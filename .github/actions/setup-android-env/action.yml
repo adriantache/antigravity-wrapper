@@ -47,7 +47,15 @@ runs:
         RELEASE_KEYSTORE_ALIAS: ${{ inputs.keystore-alias }}
         RELEASE_KEY_PASSWORD: ${{ inputs.key-password }}
       run: |
+        # Trim accidental leading/trailing whitespace from copy-pasted alias
+        RELEASE_KEYSTORE_ALIAS=$(printf '%s' "$RELEASE_KEYSTORE_ALIAS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
         printf '%s' "$ENCODED_STRING" | tr -d '[:space:]' | base64 -d > keystore.jks
+        if ! keytool -list -keystore keystore.jks -storepass "$RELEASE_KEYSTORE_PASSWORD" -alias "$RELEASE_KEYSTORE_ALIAS" >/dev/null 2>&1; then
+          echo "::error::RELEASE_KEYSTORE_ALIAS was not found in keystore.jks (or keystore password is wrong). Entries in keystore.jks:"
+          keytool -list -keystore keystore.jks -storepass "$RELEASE_KEYSTORE_PASSWORD" | grep -E "PrivateKeyEntry|SecretKeyEntry" || true
+          exit 1
+        fi
         {
           printf 'keystorePassword=%s\n' "$RELEASE_KEYSTORE_PASSWORD"
           printf 'keyAlias=%s\n' "$RELEASE_KEYSTORE_ALIAS"
