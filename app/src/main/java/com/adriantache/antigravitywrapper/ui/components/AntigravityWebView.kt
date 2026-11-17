@@ -25,10 +25,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.adriantache.antigravitywrapper.util.NotificationHelper
+import com.adriantache.antigravitywrapper.util.UrlNavigationAction
+import com.adriantache.antigravitywrapper.util.UrlPolicy
 
 const val MOBILE_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
@@ -101,6 +104,7 @@ fun AntigravityWebView(
 ) {
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    val currentConfiguredUrl by rememberUpdatedState(url)
 
     // File chooser launcher for file uploads in Antigravity web interface
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -199,37 +203,32 @@ fun AntigravityWebView(
                         request: WebResourceRequest?
                     ): Boolean {
                         val reqUrl = request?.url ?: return false
-                        val targetUrl = reqUrl.toString()
-
-                        if (targetUrl.startsWith("antigravity://")) {
-                            val converted = NotificationHelper.normalizeUrl(targetUrl)
-                            view?.loadUrl(converted)
-                            return true
-                        }
-
-                        val host = reqUrl.host?.lowercase() ?: ""
-                        // Allow Google authentication, Antigravity web dashboard, and local servers
-                        if (host == "antigravity.google" ||
-                            host.endsWith(".antigravity.google") ||
-                            host.endsWith("google.com") ||
-                            host.endsWith("gstatic.com") ||
-                            host.endsWith("googleusercontent.com") ||
-                            host == "localhost" ||
-                            host == "10.0.2.2" ||
-                            host.startsWith("192.168.") ||
-                            host.startsWith("10.") ||
-                            host.startsWith("172.")
+                        return when (
+                            UrlPolicy.classifyNavigation(
+                                scheme = reqUrl.scheme,
+                                host = reqUrl.host,
+                                port = reqUrl.port,
+                                isForMainFrame = request.isForMainFrame,
+                                configuredServerUrl = currentConfiguredUrl
+                            )
                         ) {
-                            return false
-                        }
-
-                        // Try opening external link in external browser
-                        return try {
-                            val intent = Intent(Intent.ACTION_VIEW, reqUrl)
-                            view?.context?.startActivity(intent)
-                            true
-                        } catch (e: Exception) {
-                            false
+                            UrlNavigationAction.ALLOW_IN_WEBVIEW -> false
+                            UrlNavigationAction.CONVERT_ANTIGRAVITY_SCHEME -> {
+                                val converted = NotificationHelper.normalizeUrl(reqUrl.toString())
+                                view?.loadUrl(converted)
+                                true
+                            }
+                            UrlNavigationAction.OPEN_EXTERNALLY -> {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, reqUrl).apply {
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    view?.context?.startActivity(intent)
+                                } catch (_: Exception) {
+                                    // Keep WebView on the current page if no external handler exists
+                                }
+                                true
+                            }
                         }
                     }
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {

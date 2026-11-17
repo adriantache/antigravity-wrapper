@@ -76,8 +76,8 @@ object NotificationHelper {
         val trimmed = rawUrl.trim()
         return when {
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
-            trimmed.startsWith("antigravity://") -> {
-                val path = trimmed.removePrefix("antigravity://").removePrefix("/")
+            trimmed.startsWith("antigravity://", ignoreCase = true) -> {
+                val path = trimmed.substring("antigravity://".length).removePrefix("/")
                 "https://antigravity.google/$path"
             }
             trimmed.startsWith("/") -> "https://antigravity.google$trimmed"
