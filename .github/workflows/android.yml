@@ -24,27 +24,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checking out branch
-        uses: actions/checkout@v7
-
-      - name: Setup Shared Android Environment
-        uses: ./.github/actions/setup-android-env
-
-      - name: Run Tests with Gradle
-        run: ./gradlew test
-
-  release:
-    name: Build and Publish Release APK
-    needs: build
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    name: Build, Test, and Optional Release
     runs-on: ubuntu-latest
     steps:
       - name: Checking out branch
         uses: actions/checkout@v7
 
       - name: Validate Release Secrets
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           KEYSTORE_BASE_64: ${{ secrets.KEYSTORE_BASE_64 }}
@@ -62,15 +49,21 @@ jobs:
       - name: Setup Shared Android Environment
         uses: ./.github/actions/setup-android-env
         with:
-          keystore-b64: ${{ secrets.KEYSTORE_BASE_64 }}
-          keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          keystore-alias: ${{ secrets.RELEASE_KEYSTORE_ALIAS }}
-          key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          keystore-b64: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.KEYSTORE_BASE_64 || '' }}
+          keystore-password: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEYSTORE_PASSWORD || '' }}
+          keystore-alias: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEYSTORE_ALIAS || '' }}
+          key-password: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEY_PASSWORD || '' }}
 
-      - name: Build Release APK
-        run: ./gradlew assembleRelease
+      - name: Run Tests with Gradle
+        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        run: ./gradlew test
+
+      - name: Run Tests and Build Release APK
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        run: ./gradlew test assembleRelease
 
       - name: Verify Signed Release APK
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           ls -la app/build/outputs/apk/release/
