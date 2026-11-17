@@ -1,0 +1,55 @@
+name: 'Setup Android Environment'
+description: 'Sets up Java 17, Android SDK, and decodes the release keystore when provided'
+
+inputs:
+  keystore-b64:
+    description: 'Base64 encoded keystore string'
+    required: false
+    default: ''
+  keystore-password:
+    description: 'Password for the release keystore'
+    required: false
+    default: ''
+  keystore-alias:
+    description: 'Alias for the release key'
+    required: false
+    default: ''
+  key-password:
+    description: 'Password for the release key'
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Java
+      uses: actions/setup-java@v6
+      with:
+        distribution: 'temurin'
+        java-version: 17
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v4.0.4
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v6
+
+    - name: Grant execute permission for gradlew
+      shell: bash
+      run: chmod +x gradlew
+
+    - name: Decode Keystore
+      if: ${{ inputs.keystore-b64 != '' }}
+      shell: bash
+      env:
+        ENCODED_STRING: ${{ inputs.keystore-b64 }}
+        RELEASE_KEYSTORE_PASSWORD: ${{ inputs.keystore-password }}
+        RELEASE_KEYSTORE_ALIAS: ${{ inputs.keystore-alias }}
+        RELEASE_KEY_PASSWORD: ${{ inputs.key-password }}
+      run: |
+        printf '%s' "$ENCODED_STRING" | tr -d '[:space:]' | base64 -d > keystore.jks
+        {
+          printf 'keystorePassword=%s\n' "$RELEASE_KEYSTORE_PASSWORD"
+          printf 'keyAlias=%s\n' "$RELEASE_KEYSTORE_ALIAS"
+          printf 'keyPassword=%s\n' "$RELEASE_KEY_PASSWORD"
+        } > local.properties
