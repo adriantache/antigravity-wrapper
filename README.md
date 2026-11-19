@@ -11,6 +11,7 @@ Out of the box, Antigravity Wrapper connects to **`https://antigravity.google`**
 - **Official Web Interface (Recommended)**:
   1. Launch the app—it loads `https://antigravity.google` by default.
   2. Sign in with your Google account to access your remote Antigravity sessions.
+  > **Note on Google Sign-In:** Android `WebView` maintains its own isolated cookie and session storage, separate from Chrome and your device's system Google accounts. Even if you are already signed in to Google in your browser or on your phone, you will need to log in to your Google account once inside the app (and again if you use **Clear WebView Cache & Cookies**).
 - **Custom / Local / Tunneled URL**:
   If you are connecting to a specific session link or a self-hosted/tunneled instance:
   1. Copy the URL from your Antigravity desktop/web session (for example, a `https://antigravity.google/...` session link, a Tailscale/tunnel URL, or a LAN address like `http://192.168.x.x:<port>`).
