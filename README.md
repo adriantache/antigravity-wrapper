@@ -2,21 +2,51 @@
 
 An Android WebView wrapper app for [Antigravity](https://antigravity.google), built with Kotlin and Jetpack Compose.
 
+## How to Use
+
+### 1. Getting the URL
+
+Out of the box, Antigravity Wrapper connects to **`https://antigravity.google`**, the official Antigravity web interface.
+
+- **Official Web Interface (Recommended)**:
+  1. Launch the app—it loads `https://antigravity.google` by default.
+  2. Sign in with your Google account to access your remote Antigravity sessions.
+- **Custom / Local / Tunneled URL**:
+  If you are connecting to a specific session link or a self-hosted/tunneled instance:
+  1. Copy the URL from your Antigravity desktop/web session (for example, a `https://antigravity.google/...` session link, a Tailscale/tunnel URL, or a LAN address like `http://192.168.x.x:<port>`).
+  2. In the app, tap the **floating control pill** (`⋮`) and select the **Settings** (gear) icon.
+  3. Paste the URL into **Remote Antigravity URL** and tap **Save & Connect**.
+     - If you omit `http://` or `https://`, the app automatically prepends `http://`.
+     - You can switch back anytime using **Reset to `https://antigravity.google`** or pick from **Recent Sessions**.
+- **Deep Links**:
+  The app also registers for `https://antigravity.google`, `*.antigravity.google`, and `antigravity://` links, so opening those URLs from notifications or other apps can launch directly into Antigravity Wrapper.
+
+### 2. Controls & Navigation
+
+- **Floating Control Pill (`⋮`)**:
+  - **Drag** anywhere on the screen to reposition it.
+  - **Tap `⋮`** to expand quick actions (**Refresh** and **Settings**). It auto-collapses after 5 seconds.
+- **Back Gesture**:
+  - Navigates backward through WebView history when available.
+  - At the root page (with **Intercept Back Gestures** enabled), pressing Back sends an `Escape` key event to the web UI to dismiss popups/menus and requires a second press within 2 seconds to exit.
+- **Pull to Refresh**: Swipe down from the top of the page to reload.
+
+### 3. Session Settings
+
+Open **Settings** from the floating control pill to configure:
+
+- **Remote Antigravity URL** & **Recent Sessions** (stores up to 10 recent URLs)
+- **Intercept Back Gestures**: Send `Escape` to the web session and require double-back to exit (enabled by default)
+- **Pull to Refresh**: Swipe down at the top of the page to reload (enabled by default)
+- **Keep Screen On**: Prevent display timeout while viewing a session (enabled by default)
+- **Desktop User-Agent**: Request the desktop web layout instead of mobile
+- **Clear WebView Cache & Cookies**: Reset cached site data and sign-in cookies
+
 ## Features
 
 - **Native Android Experience**: Edge-to-edge dark UI (`#101010` system bars), pull-to-refresh, and a top loading progress indicator.
-- **Smart URL & Deep-Link Routing**:
-  - Handles `https://antigravity.google`, `*.antigravity.google`, and `antigravity://` deep links.
-  - Keeps Antigravity pages, Google authentication flows, and your configured custom server URL inside the WebView while opening external links in your default browser or app.
+- **Smart URL Routing**: Keeps Antigravity pages, Google authentication flows, and your configured server URL inside the WebView while opening external links in your default browser or app.
 - **Web-to-Native Notifications**: Bridges web `Notification` and `ServiceWorkerRegistration.showNotification` calls to native Android notifications with tap-to-open deep linking.
-- **Floating Control Pill**: A draggable, auto-collapsing floating pill for quick **Refresh** and **Session Settings** access.
-- **Session Settings**:
-  - Connect to the default `https://antigravity.google` or any custom remote Antigravity URL, with recent session history (up to 10 URLs).
-  - **Desktop Mode** toggle (switches between mobile and desktop user agents).
-  - **Keep Screen On** toggle.
-  - **Pull to Refresh** toggle.
-  - **Double-Back to Exit** toggle (also dispatches `Escape` to the web UI to dismiss popups/dropdowns).
-  - Clear WebView cache and cookies.
 - **Auto-Reconnect**: Monitors network connectivity and automatically reloads the session when internet access is restored.
 - **File Uploads**: Supports Android file picker integration for WebView file inputs.
 
@@ -69,41 +99,3 @@ app/src/main/java/com/adriantache/antigravitywrapper/
     ├── NotificationHelper.kt        # Notification channel, intent extraction, URL normalization
     └── UrlPolicy.kt                 # Internal vs. external URL navigation policy
 ```
-
-## Publishing a Release Remotely (GitHub Actions)
-
-This repository uses `.github/workflows/android.yml` to run tests and build signed release APKs for GitHub Releases.
-
-### 1. One-Time Keystore & GitHub Secrets Setup
-
-Create a release keystore if you don't already have one:
-
-```powershell
-keytool -genkeypair -v -keystore keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias antigravitywrapper
-```
-
-Base64-encode `keystore.jks` (single line, no wrapping):
-
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("keystore.jks")) | Set-Clipboard
-```
-
-Add these 4 repository secrets in GitHub (**Settings → Secrets and variables → Actions → New repository secret**):
-
-| Secret Name | Value |
-| --- | --- |
-| `KEYSTORE_BASE_64` | Base64 contents of `keystore.jks` |
-| `RELEASE_KEYSTORE_PASSWORD` | Keystore password |
-| `RELEASE_KEYSTORE_ALIAS` | Key alias (e.g. `antigravitywrapper`) |
-| `RELEASE_KEY_PASSWORD` | Key password |
-
-> Keep `keystore.jks` and `local.properties` out of git (both are in `.gitignore`).
-
-### 2. Triggering a Release Remotely
-
-Bump `versionCode` and `versionName` in `app/build.gradle.kts` (following `1.0.0` → `10000`), commit, and push to `master`/`main`. Then publish using either option:
-
-- **Option A — GitHub Releases UI (or GitHub mobile app)**:
-  Go to **Releases → Draft a new release**, create a tag (e.g. `v1.0.0`), and click **Publish release**. GitHub Actions will run tests, build the signed release APK, and attach it to the release.
-- **Option B — Actions "Run workflow"**:
-  Go to **Actions → Android CI → Run workflow**, enter the tag (e.g. `v1.0.0`), and run it. GitHub Actions will run tests, build the signed release APK, create the GitHub Release with generated release notes, and attach the APK.
