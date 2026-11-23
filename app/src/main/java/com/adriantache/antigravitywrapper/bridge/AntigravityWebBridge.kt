@@ -23,6 +23,8 @@ class AntigravityWebBridge(
     private val configuredServerUrlProvider: () -> String,
     private val onComposerStateChanged: (ComposerState) -> Unit,
     private val onModelsLoaded: (List<ModelOption>) -> Unit,
+    private val onModelSubOptionsLoaded: (parentName: String, parentFullText: String, options: List<ModelOption>) -> Unit = { _, _, _ -> },
+    private val onModelSelectDone: () -> Unit = {},
     private val onPermissionsLoaded: (List<PermissionOption>) -> Unit,
     private val onScrollStateChanged: (Boolean) -> Unit,
     private val onSendResult: (ok: Boolean, error: String?) -> Unit,
@@ -99,6 +101,16 @@ class AntigravityWebBridge(
                 postToMain { onModelsLoaded(event.models) }
             }
 
+            is BridgeEvent.ModelSubOptions -> {
+                postToMain {
+                    onModelSubOptionsLoaded(event.parentName, event.parentFullText, event.options)
+                }
+            }
+
+            is BridgeEvent.ModelSelectResult -> {
+                postToMain { onModelSelectDone() }
+            }
+
             is BridgeEvent.PermissionsLoaded -> {
                 postToMain { onPermissionsLoaded(event.options) }
             }
@@ -157,6 +169,21 @@ class AntigravityWebBridge(
 
     fun selectModel(option: ModelOption) {
         postToComposerFrame(ComposerBridgeProtocol.encodeSelectModel(option.fullText, option.name))
+    }
+
+    fun selectModelSubOption(
+        parentFullText: String,
+        parentName: String,
+        subOption: ModelOption
+    ) {
+        postToComposerFrame(
+            ComposerBridgeProtocol.encodeSelectModel(
+                fullText = parentFullText,
+                name = parentName,
+                subFullText = subOption.fullText,
+                subName = subOption.name
+            )
+        )
     }
 
     fun requestPermissions(): Boolean {

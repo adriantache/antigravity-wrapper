@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
@@ -395,10 +396,16 @@ private fun ComposerSelectorChip(
 fun ModelPickerBottomSheet(
     models: List<ModelOption>,
     isLoading: Boolean,
+    subOptionsTitle: String? = null,
+    subOptions: List<ModelOption> = emptyList(),
+    onBackFromSubOptions: () -> Unit = {},
     onSelect: (ModelOption) -> Unit,
+    onSelectSubOption: (ModelOption) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val showingSubOptions = !subOptionsTitle.isNullOrBlank() && subOptions.isNotEmpty()
+    val displayedItems = if (showingSubOptions) subOptions else models
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -411,12 +418,37 @@ fun ModelPickerBottomSheet(
                 .fillMaxWidth()
                 .padding(bottom = 24.dp)
         ) {
-            Text(
-                text = "Select Model",
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = Color.White,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (showingSubOptions) {
+                    IconButton(
+                        onClick = onBackFromSubOptions,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back to models",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                } else {
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(
+                    text = if (showingSubOptions) subOptionsTitle.orEmpty() else "Select Model",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
+            }
             HorizontalDivider(color = ComposerBorder)
 
             when {
@@ -430,7 +462,7 @@ fun ModelPickerBottomSheet(
                         CircularProgressIndicator(modifier = Modifier.size(28.dp))
                     }
                 }
-                models.isEmpty() -> {
+                displayedItems.isEmpty() -> {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -448,14 +480,16 @@ fun ModelPickerBottomSheet(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp)
+                            .heightIn(max = 460.dp)
                     ) {
-                        items(models) { option ->
+                        items(displayedItems) { option ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .alpha(if (option.isDisabled) 0.45f else 1f)
-                                    .clickable(enabled = !option.isDisabled) { onSelect(option) }
+                                    .clickable(enabled = !option.isDisabled) {
+                                        if (showingSubOptions) onSelectSubOption(option) else onSelect(option)
+                                    }
                                     .padding(horizontal = 20.dp, vertical = 14.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)

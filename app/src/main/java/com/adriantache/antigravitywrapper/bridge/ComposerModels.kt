@@ -44,6 +44,12 @@ sealed class BridgeEvent {
     data object Ready : BridgeEvent()
     data class ComposerStateChanged(val state: ComposerState) : BridgeEvent()
     data class ModelsLoaded(val models: List<ModelOption>) : BridgeEvent()
+    data class ModelSubOptions(
+        val parentName: String,
+        val parentFullText: String,
+        val options: List<ModelOption>
+    ) : BridgeEvent()
+    data class ModelSelectResult(val done: Boolean) : BridgeEvent()
     data class PermissionsLoaded(val options: List<PermissionOption>) : BridgeEvent()
     data class ScrollStateChanged(val canScrollUp: Boolean) : BridgeEvent()
     data class SendResult(val ok: Boolean, val error: String? = null) : BridgeEvent()
@@ -75,29 +81,17 @@ object ComposerBridgeProtocol {
                     )
                 )
 
-                "modelsList" -> {
-                    val arr = json.optJSONArray("models") ?: JSONArray()
-                    val models = buildList {
-                        for (i in 0 until arr.length()) {
-                            val item = arr.optJSONObject(i) ?: continue
-                            val name = item.optString("name", "").trim()
-                            val fullText = item.optString("fullText", name).trim()
-                            if (name.isNotEmpty() || fullText.isNotEmpty()) {
-                                add(
-                                    ModelOption(
-                                        name = name.ifEmpty { fullText },
-                                        effort = item.optString("effort", "").trim(),
-                                        badge = item.optString("badge", "").trim(),
-                                        fullText = fullText.ifEmpty { name },
-                                        isDisabled = item.optBoolean("disabled", false),
-                                        isSelected = item.optBoolean("isSelected", false)
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    BridgeEvent.ModelsLoaded(models)
-                }
+                "modelsList" -> BridgeEvent.ModelsLoaded(parseModelArray(json.optJSONArray("models")))
+
+                "modelSubOptions" -> BridgeEvent.ModelSubOptions(
+                    parentName = json.optString("parentName", "").trim(),
+                    parentFullText = json.optString("parentFullText", "").trim(),
+                    options = parseModelArray(json.optJSONArray("options"))
+                )
+
+                "modelSelectResult" -> BridgeEvent.ModelSelectResult(
+                    done = json.optBoolean("done", true)
+                )
 
                 "permissionsList" -> {
                     val arr = json.optJSONArray("items") ?: JSONArray()
@@ -156,6 +150,29 @@ object ComposerBridgeProtocol {
         }
     }
 
+    private fun parseModelArray(arr: JSONArray?): List<ModelOption> {
+        if (arr == null) return emptyList()
+        return buildList {
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val name = item.optString("name", "").trim()
+                val fullText = item.optString("fullText", name).trim()
+                if (name.isNotEmpty() || fullText.isNotEmpty()) {
+                    add(
+                        ModelOption(
+                            name = name.ifEmpty { fullText },
+                            effort = item.optString("effort", "").trim(),
+                            badge = item.optString("badge", "").trim(),
+                            fullText = fullText.ifEmpty { name },
+                            isDisabled = item.optBoolean("disabled", false),
+                            isSelected = item.optBoolean("isSelected", false)
+                        )
+                    )
+                }
+            }
+        }
+    }
+
     fun encodeConfig(config: BridgeConfig): String = JSONObject().apply {
         put("type", "config")
         put("nativeComposerEnabled", config.nativeComposerEnabled)
@@ -169,10 +186,17 @@ object ComposerBridgeProtocol {
         put("text", text)
     }.toString()
 
-    fun encodeSelectModel(fullText: String, name: String): String = JSONObject().apply {
+    fun encodeSelectModel(
+        fullText: String,
+        name: String,
+        subFullText: String? = null,
+        subName: String? = null
+    ): String = JSONObject().apply {
         put("type", "selectModel")
         put("fullText", fullText)
         put("name", name)
+        if (!subFullText.isNullOrBlank()) put("subFullText", subFullText)
+        if (!subName.isNullOrBlank()) put("subName", subName)
     }.toString()
 
     fun encodeSelectPermission(label: String): String = JSONObject().apply {

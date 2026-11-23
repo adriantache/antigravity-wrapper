@@ -221,6 +221,9 @@ fun AntigravityApp(
     var showModelSheet by remember { mutableStateOf(false) }
     var isLoadingModels by remember { mutableStateOf(false) }
     var availableModels by remember { mutableStateOf<List<ModelOption>>(emptyList()) }
+    var modelSubParentName by remember { mutableStateOf<String?>(null) }
+    var modelSubParentFullText by remember { mutableStateOf<String?>(null) }
+    var modelSubOptions by remember { mutableStateOf<List<ModelOption>>(emptyList()) }
 
     var showPermissionsSheet by remember { mutableStateOf(false) }
     var isLoadingPermissions by remember { mutableStateOf(false) }
@@ -236,7 +239,23 @@ fun AntigravityApp(
             },
             onModelsLoaded = { models ->
                 availableModels = models
+                modelSubParentName = null
+                modelSubParentFullText = null
+                modelSubOptions = emptyList()
                 isLoadingModels = false
+            },
+            onModelSubOptionsLoaded = { parentName, parentFullText, options ->
+                modelSubParentName = parentName
+                modelSubParentFullText = parentFullText
+                modelSubOptions = options
+                isLoadingModels = false
+            },
+            onModelSelectDone = {
+                isLoadingModels = false
+                modelSubParentName = null
+                modelSubParentFullText = null
+                modelSubOptions = emptyList()
+                showModelSheet = false
             },
             onPermissionsLoaded = { options ->
                 availablePermissions = options
@@ -328,6 +347,16 @@ fun AntigravityApp(
                     message = "Send timed out — your draft was kept",
                     duration = SnackbarDuration.Short
                 )
+            }
+        }
+    }
+
+    // Guard against stuck model loading spinner
+    LaunchedEffect(isLoadingModels) {
+        if (isLoadingModels) {
+            delay(3000L)
+            if (isLoadingModels) {
+                isLoadingModels = false
             }
         }
     }
@@ -682,11 +711,30 @@ fun AntigravityApp(
                 ModelPickerBottomSheet(
                     models = availableModels,
                     isLoading = isLoadingModels,
+                    subOptionsTitle = modelSubParentName,
+                    subOptions = modelSubOptions,
+                    onBackFromSubOptions = {
+                        modelSubParentName = null
+                        modelSubParentFullText = null
+                        modelSubOptions = emptyList()
+                    },
                     onSelect = { option ->
-                        showModelSheet = false
+                        isLoadingModels = true
                         webBridge.selectModel(option)
                     },
-                    onDismiss = { showModelSheet = false }
+                    onSelectSubOption = { subOption ->
+                        val pFull = modelSubParentFullText ?: return@ModelPickerBottomSheet
+                        val pName = modelSubParentName ?: pFull
+                        isLoadingModels = true
+                        webBridge.selectModelSubOption(pFull, pName, subOption)
+                    },
+                    onDismiss = {
+                        showModelSheet = false
+                        isLoadingModels = false
+                        modelSubParentName = null
+                        modelSubParentFullText = null
+                        modelSubOptions = emptyList()
+                    }
                 )
             }
 

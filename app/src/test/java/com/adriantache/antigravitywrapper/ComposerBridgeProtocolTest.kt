@@ -107,6 +107,28 @@ class ComposerBridgeProtocolTest {
         assertTrue(attachOk.ok)
         assertEquals(listOf("photo.jpg", "notes.txt"), attachOk.fileNames)
         assertNull(attachOk.error)
+
+        val subOpts = ComposerBridgeProtocol.parseEvent(
+            """
+            {
+              "type": "modelSubOptions",
+              "parentName": "Gemini 4 Neon",
+              "parentFullText": "Gemini 4 Neon High New",
+              "options": [
+                {"name": "High", "effort": "", "badge": "", "fullText": "High", "disabled": false, "isSelected": true},
+                {"name": "Medium", "effort": "", "badge": "", "fullText": "Medium", "disabled": false, "isSelected": false}
+              ]
+            }
+            """.trimIndent()
+        ) as BridgeEvent.ModelSubOptions
+        assertEquals("Gemini 4 Neon", subOpts.parentName)
+        assertEquals(2, subOpts.options.size)
+        assertEquals("High", subOpts.options[0].name)
+        assertTrue(subOpts.options[0].isSelected)
+
+        val selectDone = ComposerBridgeProtocol.parseEvent("""{"type":"modelSelectResult","done":true}""")
+            as BridgeEvent.ModelSelectResult
+        assertTrue(selectDone.done)
     }
 
     @Test
@@ -140,11 +162,18 @@ class ComposerBridgeProtocolTest {
         assertEquals("Hello\nWorld", sendJson.getString("text"))
 
         val modelJson = JSONObject(
-            ComposerBridgeProtocol.encodeSelectModel("Gemini 4 Neon High New", "Gemini 4 Neon")
+            ComposerBridgeProtocol.encodeSelectModel(
+                fullText = "Gemini 4 Neon High New",
+                name = "Gemini 4 Neon",
+                subFullText = "Medium",
+                subName = "Medium"
+            )
         )
         assertEquals("selectModel", modelJson.getString("type"))
         assertEquals("Gemini 4 Neon High New", modelJson.getString("fullText"))
         assertEquals("Gemini 4 Neon", modelJson.getString("name"))
+        assertEquals("Medium", modelJson.getString("subFullText"))
+        assertEquals("Medium", modelJson.getString("subName"))
 
         val batchStart = JSONObject(ComposerBridgeProtocol.encodeAttachBatchStart("b_1", 2))
         assertEquals("attachBatchStart", batchStart.getString("type"))

@@ -675,21 +675,31 @@ object AntigravityBridgeScript {
 
   function extractOverlayItems(container) {
     if (!container) return [];
-    var roleItems = Array.prototype.slice.call(
-      container.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"]')
+    // Collect ALL candidate items in DOM order: Antigravity's .agy-overlay-item rows,
+    // ARIA menu/option items, and mobile collapsible/button triggers (e.g. models with effort submenus)
+    var candidates = Array.prototype.slice.call(
+      container.querySelectorAll(
+        '.agy-overlay-item, [role="menuitem"], [role="menuitemradio"], [role="option"], [aria-haspopup="menu"], button, [role="button"]'
+      )
     );
-    if (roleItems.length > 0) return roleItems;
-
-    // Mobile sheets/dialogs may render choices as plain <button> or clickable rows
-    var buttons = Array.prototype.slice.call(container.querySelectorAll('button, [tabindex="0"]'))
-      .filter(function(el) {
-        var txt = (el.innerText || el.textContent || '').trim();
-        if (!txt) return false;
-        var aria = (el.getAttribute('aria-label') || '').toLowerCase();
-        if (aria === 'close' || aria === 'dismiss') return false;
-        return true;
-      });
-    return buttons;
+    var filtered = [];
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      var isNested = false;
+      for (var j = 0; j < candidates.length; j++) {
+        if (i !== j && candidates[j].contains(el)) {
+          isNested = true;
+          break;
+        }
+      }
+      if (isNested) continue;
+      var txt = (el.innerText || el.textContent || '').trim();
+      if (!txt) continue;
+      var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+      if (aria === 'close' || aria === 'dismiss' || aria === 'back') continue;
+      filtered.push(el);
+    }
+    return filtered;
   }
 
   async function waitForOverlayItems(timeoutMs, beforeSet) {
@@ -783,7 +793,7 @@ object AntigravityBridgeScript {
   function parseModelMenuItem(item, currentModelLower) {
     var rawText = (item.innerText || item.textContent || '').trim();
     var fullText = rawText.replace(/\s+/g, ' ');
-    if (!fullText || /^view usage$/i.test(fullText) || /^model$/i.test(fullText) || /^close$/i.test(fullText)) {
+    if (!fullText || /^(view usage|model|close|back)$/i.test(fullText)) {
       return null;
     }
 
@@ -860,9 +870,74 @@ object AntigravityBridgeScript {
     }
   }
 
-  async function selectModel(fullText, name) {
+  function findMatchingItem(items, targetFull, targetName) {
+    var fLower = (targetFull || '').trim().toLowerCase();
+    var nLower = (targetName || '').trim().toLowerCase();
+    return items.find(function(item) {
+      return (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase() === fLower;
+    }) || items.find(function(item) {
+      var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase();
+      return nLower && txt.indexOf(nLower) === 0;
+    });
+  }
+
+  function findSubOptionElements(foundContainer, beforeItemsSet, beforePortalsSet, parentEl) {
+    // 1. Check newly mounted submenu portals (Base UI nested Menu.Portal)
+    var subPortals = findNewBodyPortals(beforePortalsSet);
+    subPortals.forEach(function(p) { p.setAttribute('data-agy-scraped-portal', 'true'); });
+    for (var i = subPortals.length - 1; i >= 0; i--) {
+      var pItems = extractOverlayItems(subPortals[i]);
+      if (pItems.length > 0) return pItems;
+    }
+
+    // 2. Check for additional [role="menu"] overlays that appeared inside existing portals
+    var allMenus = Array.prototype.slice.call(document.querySelectorAll('[role="menu"], [role="listbox"]'));
+    for (var m = allMenus.length - 1; m >= 0; m--) {
+      if (foundContainer && allMenus[m] === foundContainer) continue;
+      if (foundContainer && foundContainer.contains(allMenus[m])) {
+        var nestedItems = extractOverlayItems(allMenus[m]).filter(function(el) { return !beforeItemsSet.has(el); });
+        if (nestedItems.length > 0) return nestedItems;
+      }
+    }
+
+    // 3. Check for newly rendered/expanded items inside the same container (mobile accordion / drill-down sheet)
+    if (foundContainer && document.contains(foundContainer)) {
+      var currentItems = extractOverlayItems(foundContainer);
+      var addedItems = currentItems.filter(function(el) {
+        return !beforeItemsSet.has(el) && el !== parentEl;
+      });
+      if (addedItems.length > 0) return addedItems;
+    }
+
+    return [];
+  }
+
+  function activateSubmenuOrItem(el) {
+    try { el.click(); } catch (e) {}
+    // Base UI desktop submenu triggers may open on pointer/mouse hover
+    if (el.getAttribute('aria-haspopup') === 'menu' || el.getAttribute('aria-expanded') === 'false') {
+      var rect = el.getBoundingClientRect();
+      var opts = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2
+      };
+      try { el.dispatchEvent(new PointerEvent('pointerenter', opts)); } catch (e) {}
+      try { el.dispatchEvent(new PointerEvent('pointermove', opts)); } catch (e) {}
+      try { el.dispatchEvent(new MouseEvent('mouseover', opts)); } catch (e) {}
+      try { el.dispatchEvent(new MouseEvent('mousemove', opts)); } catch (e) {}
+    }
+  }
+
+  async function selectModel(fullText, name, subFullText, subName) {
     var trigger = findModelTrigger();
-    if (!trigger) return;
+    if (!trigger) {
+      postToNative({ type: 'modelSelectResult', done: true });
+      return;
+    }
+    var prevModel = extractTriggerLabel(trigger, /^Select model,?\s*/i).toLowerCase();
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
     if (body) body.classList.add('agy-scraping-menu');
@@ -870,29 +945,78 @@ object AntigravityBridgeScript {
     try {
       await openTriggerOverlay(trigger);
       var found = await waitForOverlayItems(800, beforeSet);
-      if (found) {
-        var targetFull = (fullText || '').trim().toLowerCase();
-        var targetName = (name || '').trim().toLowerCase();
-        var match = found.items.find(function(item) {
-          return (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase() === targetFull;
-        }) || found.items.find(function(item) {
-          var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase();
-          return targetName && txt.indexOf(targetName) === 0;
-        });
+      if (!found) {
+        postToNative({ type: 'modelSelectResult', done: true });
+        return;
+      }
 
-        if (match) {
-          try { match.click(); } catch (e) { triggerElementClick(match); }
-          await sleep(60);
-          // Ensure overlay closed if it didn't auto-dismiss on click
-          if (findNewBodyPortals(beforeSet).length > 0 && trigger.getAttribute('aria-expanded') === 'true') {
-            await closeOpenOverlay(trigger, found, beforeSet);
+      var match = findMatchingItem(found.items, fullText, name);
+      if (!match) {
+        await closeOpenOverlay(trigger, found, beforeSet);
+        postToNative({ type: 'modelSelectResult', done: true });
+        return;
+      }
+
+      var beforeItemsSet = new Set(found.items);
+      var beforeClickPortals = snapshotBodyChildren();
+      activateSubmenuOrItem(match);
+
+      // Wait briefly to see whether clicking directly selected the model OR opened effort sub-options
+      var subItems = [];
+      var waitDeadline = Date.now() + (subFullText ? 650 : 280);
+      while (Date.now() < waitDeadline) {
+        await sleep(30);
+        var nowModel = extractTriggerLabel(trigger, /^Select model,?\s*/i).toLowerCase();
+        var overlayClosed = trigger.getAttribute('aria-expanded') !== 'true' &&
+          findNewBodyPortals(beforeSet).length === 0;
+        if (!subFullText && (overlayClosed || (nowModel && nowModel !== prevModel))) {
+          break;
+        }
+        subItems = findSubOptionElements(found.container, beforeItemsSet, beforeClickPortals, match);
+        if (subItems.length > 0) break;
+      }
+
+      if (subFullText) {
+        // Step 2: user chose a specific effort/sub-option — click it
+        if (subItems.length > 0) {
+          var subMatch = findMatchingItem(subItems, subFullText, subName);
+          if (subMatch) {
+            try { subMatch.click(); } catch (e) { triggerElementClick(subMatch); }
+            await sleep(80);
           }
+        }
+        await closeOpenOverlay(trigger, found, beforeSet);
+        await sleep(60);
+        reportComposerState(true);
+        postToNative({ type: 'modelSelectResult', done: true });
+      } else if (subItems.length > 0) {
+        // Step 1 opened an effort/variant submenu — return those options to the native sheet
+        var parsedSubs = [];
+        subItems.forEach(function(item) {
+          var parsed = parseModelMenuItem(item, prevModel);
+          if (parsed) parsedSubs.push(parsed);
+        });
+        await closeOpenOverlay(trigger, found, beforeSet);
+        if (parsedSubs.length > 0) {
+          postToNative({
+            type: 'modelSubOptions',
+            parentName: name || fullText || '',
+            parentFullText: fullText || name || '',
+            options: parsedSubs
+          });
         } else {
+          reportComposerState(true);
+          postToNative({ type: 'modelSelectResult', done: true });
+        }
+      } else {
+        // Direct single-step selection completed
+        if (findNewBodyPortals(beforeSet).length > 0 || trigger.getAttribute('aria-expanded') === 'true') {
           await closeOpenOverlay(trigger, found, beforeSet);
         }
+        await sleep(60);
+        reportComposerState(true);
+        postToNative({ type: 'modelSelectResult', done: true });
       }
-      await sleep(80);
-      reportComposerState(true);
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
     }
@@ -1014,7 +1138,7 @@ object AntigravityBridgeScript {
         break;
 
       case 'selectModel':
-        selectModel(cmd.fullText, cmd.name);
+        selectModel(cmd.fullText, cmd.name, cmd.subFullText, cmd.subName);
         break;
 
       case 'getPermissions':
