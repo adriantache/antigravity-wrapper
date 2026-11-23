@@ -534,6 +534,42 @@ object AntigravityBridgeScript {
   }
 
   // 7. Lexical text insertion & send
+  function isSendButtonEnabled() {
+    var sendBtn = findSendButton();
+    return !!(sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true');
+  }
+
+  function selectAllInEditor(editor) {
+    editor.focus({ preventScroll: true });
+    var sel = window.getSelection();
+    if (sel) {
+      var range = document.createRange();
+      range.selectNodeContents(editor);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    try { document.dispatchEvent(new Event('selectionchange')); } catch (e) {}
+  }
+
+  async function clearLexicalEditor(editor) {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if ((editor.innerText || '').trim().length === 0) return;
+      selectAllInEditor(editor);
+      await sleep(20);
+      try {
+        editor.dispatchEvent(new InputEvent('beforeinput', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'deleteContentBackward'
+        }));
+      } catch (e) {}
+      if ((editor.innerText || '').trim().length > 0) {
+        try { document.execCommand('delete', false); } catch (e) {}
+      }
+      await sleep(25);
+    }
+  }
+
   async function sendToLexical(text) {
     if (isSending) return { ok: false, error: 'Already sending' };
     var editor = findEditor();
@@ -541,84 +577,88 @@ object AntigravityBridgeScript {
 
     isSending = true;
     try {
-      var hasText = (text || '').trim().length > 0;
+      var trimmedText = (text || '').trim();
+      var hasText = trimmedText.length > 0;
       if (hasText) {
-        editor.focus({ preventScroll: true });
+        selectAllInEditor(editor);
+        await sleep(30);
 
-        // Clear any previous draft in the hidden editor
-        var sel = window.getSelection();
-        if (sel) {
-          var range = document.createRange();
-          range.selectNodeContents(editor);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-        if ((editor.innerText || '').trim().length > 0) {
-          try { document.execCommand('delete', false); } catch (e) {}
-          await sleep(16);
-        }
+        var existingText = (editor.innerText || '').trim();
+        var alreadyReady = existingText === trimmedText && isSendButtonEnabled();
 
-        var inserted = false;
+        if (!alreadyReady) {
+          if (existingText.length > 0) {
+            await clearLexicalEditor(editor);
+          }
 
-        // Strategy A: Synthetic paste (Lexical's PASTE_COMMAND handles multiline text cleanly)
-        try {
-          var dt = new DataTransfer();
-          dt.setData('text/plain', text);
-          var pasteEvent = new ClipboardEvent('paste', {
-            bubbles: true,
-            cancelable: true,
-            clipboardData: dt
-          });
-          editor.dispatchEvent(pasteEvent);
-          await sleep(35);
-          inserted = (editor.innerText || '').trim().length > 0;
-        } catch (e) {}
+          selectAllInEditor(editor);
+          await sleep(25);
 
-        // Strategy B: execCommand('insertText')
-        if (!inserted) {
+          // Strategy A: Synthetic paste (Lexical's PASTE_COMMAND handles multiline text cleanly)
           try {
-            editor.focus({ preventScroll: true });
-            document.execCommand('insertText', false, text);
-            await sleep(35);
-            inserted = (editor.innerText || '').trim().length > 0;
-          } catch (e) {}
-        }
-
-        // Strategy C: beforeinput InputEvent
-        if (!inserted) {
-          try {
-            editor.dispatchEvent(new InputEvent('beforeinput', {
+            var dt = new DataTransfer();
+            dt.setData('text/plain', text);
+            var pasteEvent = new ClipboardEvent('paste', {
               bubbles: true,
               cancelable: true,
-              inputType: 'insertText',
-              data: text
-            }));
-            await sleep(35);
-            inserted = (editor.innerText || '').trim().length > 0;
+              clipboardData: dt
+            });
+            editor.dispatchEvent(pasteEvent);
+            await sleep(60);
           } catch (e) {}
+
+          // Strategy B: beforeinput insertText (Lexical's native text input handler)
+          if (!isSendButtonEnabled()) {
+            if ((editor.innerText || '').trim().length > 0 && (editor.innerText || '').trim() !== trimmedText) {
+              await clearLexicalEditor(editor);
+            }
+            selectAllInEditor(editor);
+            await sleep(20);
+            try {
+              editor.dispatchEvent(new InputEvent('beforeinput', {
+                bubbles: true,
+                cancelable: true,
+                inputType: 'insertText',
+                data: text
+              }));
+              await sleep(60);
+            } catch (e) {}
+          }
+
+          // Strategy C: execCommand('insertText') fallback
+          if (!isSendButtonEnabled() && (editor.innerText || '').trim().length === 0) {
+            selectAllInEditor(editor);
+            await sleep(20);
+            try {
+              document.execCommand('insertText', false, text);
+              editor.dispatchEvent(new Event('input', { bubbles: true }));
+              await sleep(60);
+            } catch (e) {}
+          }
         }
 
-        if (!inserted) {
+        if ((editor.innerText || '').trim().length === 0) {
           try { editor.blur(); } catch (e) {}
           return { ok: false, error: 'Could not insert text into web composer' };
         }
       }
 
       // Wait for Send button to become enabled, then click
-      var deadline = Date.now() + 700;
+      var deadline = Date.now() + 1200;
       var sent = false;
       while (Date.now() < deadline) {
         var sendBtn = findSendButton();
         if (sendBtn && !sendBtn.disabled && sendBtn.getAttribute('aria-disabled') !== 'true') {
-          triggerElementClick(sendBtn);
+          try { sendBtn.click(); } catch (e) { triggerElementClick(sendBtn); }
           sent = true;
           break;
         }
-        await sleep(25);
+        await sleep(30);
       }
 
       // Fallback: Enter key on Lexical editor
       if (!sent && hasText) {
+        editor.focus({ preventScroll: true });
         editor.dispatchEvent(new KeyboardEvent('keydown', {
           key: 'Enter',
           code: 'Enter',
@@ -627,7 +667,7 @@ object AntigravityBridgeScript {
           bubbles: true,
           cancelable: true
         }));
-        await sleep(80);
+        await sleep(100);
         sent = (editor.innerText || '').trim().length === 0;
       }
 

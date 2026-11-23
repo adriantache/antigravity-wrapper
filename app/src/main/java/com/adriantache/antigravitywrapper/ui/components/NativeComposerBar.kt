@@ -137,9 +137,17 @@ fun NativeComposerBar(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
+            // Concentric corner math with uniform 8.dp card padding:
+            // Top: 32.dp pill controls (16.dp radius) + 8.dp padding = 24.dp
+            // Bottom: 44.dp circular buttons (22.dp radius) + 8.dp padding = 30.dp
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(
+                    topStart = 24.dp,
+                    topEnd = 24.dp,
+                    bottomStart = 30.dp,
+                    bottomEnd = 30.dp
+                ),
                 color = ComposerCardBg,
                 border = BorderStroke(1.dp, ComposerBorder),
                 shadowElevation = if (isFloatingOverlay) 8.dp else 0.dp
@@ -147,20 +155,20 @@ fun NativeComposerBar(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Top bar: Model selector chip, Permissions chip, and Switch-to-Web button
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (composerState.currentModel.isNotBlank()) {
@@ -181,9 +189,12 @@ fun NativeComposerBar(
                         }
 
                         // Quick fallback to the web composer (e.g. for @ mentions or / slash commands)
-                        IconButton(
-                            onClick = onSwitchToWebComposer,
-                            modifier = Modifier.size(32.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .clickable(onClick = onSwitchToWebComposer),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Tune,
@@ -260,13 +271,13 @@ fun NativeComposerBar(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         if (composerState.hasAttach) {
-                            IconButton(
-                                onClick = onAttachClick,
-                                enabled = !isAttaching,
+                            Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
                                     .background(ComposerChipBg)
+                                    .clickable(enabled = !isAttaching, onClick = onAttachClick),
+                                contentAlignment = Alignment.Center
                             ) {
                                 if (isAttaching) {
                                     CircularProgressIndicator(
@@ -289,8 +300,8 @@ fun NativeComposerBar(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 42.dp, max = 148.dp)
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                                .heightIn(min = 44.dp, max = 148.dp)
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             if (text.isEmpty()) {
@@ -344,12 +355,13 @@ fun NativeComposerBar(
 
                         // Optional Voice button (off by default, clearly spaced away from Send)
                         if (showVoiceButton && composerState.hasVoiceButton) {
-                            IconButton(
-                                onClick = onVoiceClick,
+                            Box(
                                 modifier = Modifier
-                                    .size(42.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
                                     .background(ComposerChipBg)
+                                    .clickable(onClick = onVoiceClick),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Mic,
@@ -361,7 +373,7 @@ fun NativeComposerBar(
                             Spacer(modifier = Modifier.width(2.dp))
                         }
 
-                        // Large 46dp Send / Stop button
+                        // Large 44dp Send / Stop button (matched to Attach button for concentric symmetry)
                         val buttonColor = when {
                             showStop -> Color(0xFFD94A4A)
                             canSend -> MaterialTheme.colorScheme.primary
@@ -375,7 +387,7 @@ fun NativeComposerBar(
 
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .background(buttonColor)
                                 .clickable(enabled = showStop || canSend) {
@@ -417,14 +429,15 @@ private fun ComposerSelectorChip(
     onClick: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = CircleShape,
         color = ComposerChipBg,
         modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
+            .height(32.dp)
+            .clip(CircleShape)
             .clickable(onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
