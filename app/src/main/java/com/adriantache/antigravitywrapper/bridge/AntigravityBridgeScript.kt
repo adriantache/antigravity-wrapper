@@ -340,17 +340,19 @@ object AntigravityBridgeScript {
       return false;
     }
 
-    // On mobile single-pane navigation, the Projects / Conversations sidebar covers the viewport
-    // while keeping the chat pane mounted behind or slid offscreen.
+    // Only treat the sidebar as hiding the composer when it actually overlays the composer
+    // both horizontally AND vertically (the mobile Projects screen intentionally stacks a
+    // quick-start composer *below* the sidebar list, so sRect.bottom <= rootRect.top there).
     var sidebar = document.querySelector('[data-testid="conversation-list-sidebar"], [data-sidebar-scroll-container="true"]');
     if (sidebar) {
       var sRect = sidebar.getBoundingClientRect();
       var sVisible = sRect.width > 60 && sRect.height > 100 &&
         sRect.right > 20 && sRect.left < window.innerWidth - 20;
       if (sVisible) {
-        var coversViewport = sRect.width >= window.innerWidth * 0.7;
-        var overlapsComposer = sRect.right > rootRect.left + (rootRect.width * 0.5);
-        if (coversViewport || overlapsComposer) {
+        var overlapsHorizontally = sRect.right > rootRect.left + (rootRect.width * 0.5) &&
+          sRect.left < rootRect.right - (rootRect.width * 0.5);
+        var overlapsVertically = sRect.bottom > rootRect.top + 24;
+        if (overlapsHorizontally && overlapsVertically) {
           return false;
         }
       }
