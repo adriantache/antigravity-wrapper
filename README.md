@@ -25,8 +25,10 @@ Out of the box, Antigravity Wrapper connects to **`https://antigravity.google.co
 ### 2. Controls & Navigation
 
 - **Native Input Bar (Chat Sessions)**:
-  - Automatically activates on Antigravity chat pages for smooth, full-framerate native Android typing and free conversation scrolling while the keyboard is open (including on tablets).
-  - Includes a large **Send / Stop** button, **Attach** button, and native **Model** and **Permissions** picker sheets that work mid-draft without losing focus or clearing text.
+  - Automatically activates on Antigravity chat pages (and hides on the mobile Projects/Conversations list, login, and non-chat screens) for smooth, full-framerate native Android typing and free conversation scrolling while the keyboard is open.
+  - Includes a large **Send / Stop** button, direct **Attach** file picker with attachment preview chips, and native **Model** (including two-step effort level selection) and **Permissions** picker sheets that work mid-draft without losing focus or clearing text.
+  - **External / Hardware Keyboard**: Pressing **Return** (or **NumPad Enter**) sends immediately, while **Shift+Return** inserts a newline. On-screen touch keyboards keep normal newline behavior.
+  - **Tablet Split-View**: Floats aligned strictly to the chat column so the left Conversations sidebar stays full-height and interactive, adapting automatically when toggling the sidebar or right-side Review pane.
   - Tap the **Switch to Web Input** button on the composer bar (or in the floating `⋮` pill) anytime you want the web composer (for example, to use web-native `@` mention or `/` slash-command menus).
 - **Floating Control Pill (`⋮`)**:
   - **Drag** anywhere on the screen to reposition it.
@@ -51,14 +53,14 @@ Open **Settings** from the floating control pill to configure:
 
 ## Features
 
-- **Native Input Bar & Model Pickers**: Replaces the web Lexical input card on chat pages with a native Jetpack Compose input bar bridged over AndroidX WebKit (`WebMessageListener` + `DocumentStartJavaScript`), preserving drafts on send failures and automatically falling back on login/non-chat screens.
+- **Native Input Bar & Model Pickers**: Replaces the web Lexical input card on chat pages with a native Jetpack Compose input bar bridged over AndroidX WebKit (`WebMessageListener` + `DocumentStartJavaScript`), preserving drafts on send failures, keeping queued/pending messages and Project/Branch headers visible, and supporting multi-level model/effort selection.
 - **Enhanced Web Composer Fallback**: When switched to web input, injected CSS/JS enlarges the Send button (`40px`), hides or spaces out the voice button, keeps the model/permissions selectors tappable while typing, and unlocks tablet scrolling while the keyboard is open.
-- **Jank-Free Keyboard & Tablet Ergonomics**: Snaps the WebView once to the target IME height while animating only the lightweight native composer bar, eliminating per-frame Chromium reflow lag when opening or closing the keyboard.
+- **Jank-Free Keyboard, External Keyboard & Tablet Ergonomics**: Snaps the WebView once to the target IME height while animating only the lightweight native composer bar; aligns the floating composer to the chat column in tablet split-view; and supports hardware keyboard **Return** to send / **Shift+Return** for newline.
 - **Native Android Experience**: Edge-to-edge dark UI (`#101010` system bars), SPA-aware pull-to-refresh, and a top loading progress indicator.
 - **Smart URL Routing**: Keeps Antigravity pages, Google authentication flows, and your configured server URL inside the WebView while opening external links in your default browser or app.
 - **Web-to-Native Notifications**: Bridges web `Notification` and `ServiceWorkerRegistration.showNotification` calls (including from the cross-origin Antigravity iframe) to native Android notifications with tap-to-open deep linking.
 - **Auto-Reconnect**: Monitors network connectivity and automatically reloads the session when internet access is restored.
-- **File Uploads**: Supports Android file picker integration for WebView file inputs and the native composer Attach button.
+- **Native File Uploads**: The native composer's `+` button launches Android's document picker directly (bypassing the web submenu), transfers selected files in chunks into the web session, displays removable attachment chips, and supports attachment-only sends—alongside standard WebView file chooser support.
 
 ## Tech Stack & Requirements
 
