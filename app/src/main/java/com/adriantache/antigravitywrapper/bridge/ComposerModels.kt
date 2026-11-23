@@ -150,19 +150,22 @@ object ComposerBridgeProtocol {
         }
     }
 
+    private fun normalizeSingleLine(value: String): String =
+        value.replace(Regex("\\s+"), " ").trim()
+
     private fun parseModelArray(arr: JSONArray?): List<ModelOption> {
         if (arr == null) return emptyList()
         return buildList {
             for (i in 0 until arr.length()) {
                 val item = arr.optJSONObject(i) ?: continue
-                val name = item.optString("name", "").trim()
-                val fullText = item.optString("fullText", name).trim()
+                val name = normalizeSingleLine(item.optString("name", ""))
+                val fullText = normalizeSingleLine(item.optString("fullText", name))
                 if (name.isNotEmpty() || fullText.isNotEmpty()) {
                     add(
                         ModelOption(
                             name = name.ifEmpty { fullText },
-                            effort = item.optString("effort", "").trim(),
-                            badge = item.optString("badge", "").trim(),
+                            effort = normalizeSingleLine(item.optString("effort", "")),
+                            badge = normalizeSingleLine(item.optString("badge", "")),
                             fullText = fullText.ifEmpty { name },
                             isDisabled = item.optBoolean("disabled", false),
                             isSelected = item.optBoolean("isSelected", false)

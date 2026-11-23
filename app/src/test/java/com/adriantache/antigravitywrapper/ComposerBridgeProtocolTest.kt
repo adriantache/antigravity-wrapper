@@ -79,6 +79,30 @@ class ComposerBridgeProtocolTest {
     }
 
     @Test
+    fun parseEvent_modelsList_normalizesMultilineNames() {
+        val raw = """
+            {
+              "type": "modelsList",
+              "models": [
+                {
+                  "name": "Gemini 4 Neon\nHigh",
+                  "effort": "High\n",
+                  "badge": " New ",
+                  "fullText": "Gemini 4 Neon\nHigh\nNew",
+                  "disabled": false,
+                  "isSelected": true
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val event = ComposerBridgeProtocol.parseEvent(raw) as BridgeEvent.ModelsLoaded
+        assertEquals("Gemini 4 Neon High", event.models[0].name)
+        assertEquals("High", event.models[0].effort)
+        assertEquals("New", event.models[0].badge)
+    }
+
+    @Test
     fun parseEvent_sendResultAndScrollStateAndNotifications() {
         val sendOk = ComposerBridgeProtocol.parseEvent("""{"type":"sendResult","ok":true,"error":""}""")
             as BridgeEvent.SendResult

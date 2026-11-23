@@ -494,7 +494,11 @@ fun ModelPickerBottomSheet(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    val showEffortInline = option.effort.isNotBlank() && option.effort.length <= 12
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -507,7 +511,7 @@ fun ModelPickerBottomSheet(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
-                                        if (option.effort.isNotBlank()) {
+                                        if (showEffortInline) {
                                             Text(
                                                 text = option.effort,
                                                 color = ComposerMutedText,
@@ -516,6 +520,15 @@ fun ModelPickerBottomSheet(
                                                 overflow = TextOverflow.Ellipsis
                                             )
                                         }
+                                    }
+                                    if (option.effort.isNotBlank() && !showEffortInline) {
+                                        Text(
+                                            text = option.effort,
+                                            color = ComposerMutedText,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
                                 }
 

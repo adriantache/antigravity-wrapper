@@ -311,11 +311,54 @@ object AntigravityBridgeScript {
     syncBodyClasses();
   }
 
+  function isComposerActuallyVisible() {
+    var editor = findEditor();
+    var root = findComposerRoot();
+    if (!editor || !root) return false;
+
+    var el = root;
+    while (el && el !== document.documentElement) {
+      if (el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+      var cs = window.getComputedStyle(el);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) {
+        return false;
+      }
+      el = el.parentElement;
+    }
+
+    var hostEl = root;
+    var rootRect = hostEl.getBoundingClientRect();
+    if (rootRect.width < 10 && hostEl.parentElement) {
+      rootRect = hostEl.parentElement.getBoundingClientRect();
+    }
+    if (rootRect.width < 10 || rootRect.left >= window.innerWidth - 10 || rootRect.right <= 10) {
+      return false;
+    }
+
+    // On mobile single-pane navigation, the Projects / Conversations sidebar covers the viewport
+    // while keeping the chat pane mounted behind or slid offscreen.
+    var sidebar = document.querySelector('[data-testid="conversation-list-sidebar"], [data-sidebar-scroll-container="true"]');
+    if (sidebar) {
+      var sRect = sidebar.getBoundingClientRect();
+      var sVisible = sRect.width > 60 && sRect.height > 100 &&
+        sRect.right > 20 && sRect.left < window.innerWidth - 20;
+      if (sVisible) {
+        var coversViewport = sRect.width >= window.innerWidth * 0.7;
+        var overlapsComposer = sRect.right > rootRect.left + (rootRect.width * 0.5);
+        if (coversViewport || overlapsComposer) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   function syncBodyClasses() {
     var body = document.body;
     if (!body) return;
     var root = findComposerRoot();
-    var hasComposer = !!findEditor() && !!root;
+    var hasComposer = isComposerActuallyVisible();
     var isNativeActive = config.nativeComposerEnabled && hasComposer;
     if (isNativeActive) {
       body.classList.add('agy-native-composer-active');
@@ -356,9 +399,7 @@ object AntigravityBridgeScript {
 
   // 5. State observation
   function computeComposerState() {
-    var editor = findEditor();
-    var root = findComposerRoot();
-    var hasComposer = !!(editor && root);
+    var hasComposer = isComposerActuallyVisible();
     var modelTrigger = findModelTrigger();
     var permTrigger = findPermissionsTrigger();
     var stopBtn = findStopButton();
@@ -797,18 +838,26 @@ object AntigravityBridgeScript {
       return null;
     }
 
-    var nameEl = item.querySelector('span.truncate') ||
-      item.querySelector('span.shrink-0:not(.opacity-70)') ||
-      item.querySelector('span');
     var effortEl = item.querySelector('span.opacity-70');
+    var effort = effortEl ? (effortEl.innerText || effortEl.textContent || '').trim().replace(/\s+/g, ' ') : '';
+
+    // Pick a leaf span for the model name so wrapper spans containing "\nHigh" never leak into name
+    var leafSpans = Array.prototype.slice.call(item.querySelectorAll('span')).filter(function(s) {
+      if (s === effortEl || (effortEl && (s.contains(effortEl) || effortEl.contains(s)))) return false;
+      if (s.children.length > 0) return false;
+      var t = (s.innerText || s.textContent || '').trim();
+      if (!t || /^(New|Notice|Unavailable)$/i.test(t)) return false;
+      return true;
+    });
 
     var lines = rawText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
-    var name = nameEl ? (nameEl.innerText || nameEl.textContent || '').trim() : (lines[0] || fullText);
-    var effort = effortEl ? (effortEl.innerText || effortEl.textContent || '').trim() : '';
+    var name = leafSpans.length > 0
+      ? (leafSpans[0].innerText || leafSpans[0].textContent || '').trim().replace(/\s+/g, ' ')
+      : (lines[0] || fullText).replace(/\s+/g, ' ');
 
     if (!effort && lines.length > 1) {
       var second = lines[1];
-      if (!/^(New|Notice|Unavailable)$/i.test(second)) {
+      if (!/^(New|Notice|Unavailable)$/i.test(second) && second !== name) {
         effort = second;
       }
     }
@@ -1218,8 +1267,13 @@ object AntigravityBridgeScript {
     var target = document.body || document.documentElement;
     if (target) {
       var observer = new MutationObserver(scheduleStateReport);
-      observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'aria-expanded', 'aria-disabled'] });
+      observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'aria-expanded', 'aria-disabled', 'class', 'style', 'hidden', 'aria-hidden'] });
     }
+
+    document.addEventListener('transitionend', scheduleStateReport, true);
+    document.addEventListener('animationend', scheduleStateReport, true);
+    document.addEventListener('click', scheduleStateReport, true);
+    window.addEventListener('resize', scheduleStateReport);
 
     reportComposerState(true);
   }
