@@ -1037,7 +1037,7 @@ object AntigravityBridgeScript {
   async function scrapeModels() {
     var trigger = findModelTrigger();
     if (!trigger) {
-      postToNative({ type: 'modelsList', models: [] });
+      postToNative({ type: 'modelsList', models: [], hasViewUsage: false });
       return;
     }
 
@@ -1050,15 +1050,55 @@ object AntigravityBridgeScript {
       await openTriggerOverlay(trigger);
       var found = await waitForOverlayItems(800, beforeSet);
       var models = [];
+      var hasViewUsage = false;
       if (found) {
         found.items.forEach(function(item) {
+          var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ');
+          if (/^view usage$/i.test(txt)) {
+            hasViewUsage = true;
+            return;
+          }
           var parsed = parseModelMenuItem(item, currentModelLower);
           if (parsed) models.push(parsed);
         });
       }
       await closeOpenOverlay(trigger, found, beforeSet);
-      postToNative({ type: 'modelsList', models: models });
+      postToNative({ type: 'modelsList', models: models, hasViewUsage: hasViewUsage });
     } finally {
+      if (body) body.classList.remove('agy-scraping-menu');
+    }
+  }
+
+  async function openUsage() {
+    var trigger = findModelTrigger();
+    if (!trigger) return;
+    var beforeSet = snapshotBodyChildren();
+    var body = document.body;
+    if (body) body.classList.add('agy-scraping-menu');
+
+    try {
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
+      if (found) {
+        var usageItem = found.items.find(function(item) {
+          var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ');
+          return /^view usage$/i.test(txt) || /\bview usage\b/i.test(txt);
+        });
+        // Remove scraping class right before clicking so the Usage modal/view opens visibly
+        findNewBodyPortals(beforeSet).forEach(function(p) {
+          p.removeAttribute('data-agy-scraped-portal');
+        });
+        if (body) body.classList.remove('agy-scraping-menu');
+        if (usageItem) {
+          try { usageItem.click(); } catch (e) { triggerElementClick(usageItem); }
+        } else {
+          await closeOpenOverlay(trigger, found, beforeSet);
+        }
+      }
+    } finally {
+      findNewBodyPortals(beforeSet).forEach(function(p) {
+        p.removeAttribute('data-agy-scraped-portal');
+      });
       if (body) body.classList.remove('agy-scraping-menu');
     }
   }
@@ -1333,6 +1373,10 @@ object AntigravityBridgeScript {
 
       case 'selectModel':
         selectModel(cmd.fullText, cmd.name, cmd.subFullText, cmd.subName);
+        break;
+
+      case 'openUsage':
+        openUsage();
         break;
 
       case 'getPermissions':

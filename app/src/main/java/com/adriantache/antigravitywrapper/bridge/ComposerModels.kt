@@ -46,7 +46,10 @@ data class AttachedFilePayload(
 sealed class BridgeEvent {
     data object Ready : BridgeEvent()
     data class ComposerStateChanged(val state: ComposerState) : BridgeEvent()
-    data class ModelsLoaded(val models: List<ModelOption>) : BridgeEvent()
+    data class ModelsLoaded(
+        val models: List<ModelOption>,
+        val hasViewUsage: Boolean = false
+    ) : BridgeEvent()
     data class ModelSubOptions(
         val parentName: String,
         val parentFullText: String,
@@ -91,7 +94,10 @@ object ComposerBridgeProtocol {
                     )
                 }
 
-                "modelsList" -> BridgeEvent.ModelsLoaded(parseModelArray(json.optJSONArray("models")))
+                "modelsList" -> BridgeEvent.ModelsLoaded(
+                    models = parseModelArray(json.optJSONArray("models")),
+                    hasViewUsage = json.optBoolean("hasViewUsage", false)
+                )
 
                 "modelSubOptions" -> BridgeEvent.ModelSubOptions(
                     parentName = json.optString("parentName", "").trim(),

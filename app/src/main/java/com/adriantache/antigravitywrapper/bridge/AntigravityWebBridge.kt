@@ -22,7 +22,7 @@ class AntigravityWebBridge(
     private val context: Context,
     private val configuredServerUrlProvider: () -> String,
     private val onComposerStateChanged: (ComposerState) -> Unit,
-    private val onModelsLoaded: (List<ModelOption>) -> Unit,
+    private val onModelsLoaded: (models: List<ModelOption>, hasViewUsage: Boolean) -> Unit,
     private val onModelSubOptionsLoaded: (parentName: String, parentFullText: String, options: List<ModelOption>) -> Unit = { _, _, _ -> },
     private val onModelSelectDone: () -> Unit = {},
     private val onPermissionsLoaded: (List<PermissionOption>) -> Unit,
@@ -99,7 +99,7 @@ class AntigravityWebBridge(
             }
 
             is BridgeEvent.ModelsLoaded -> {
-                postToMain { onModelsLoaded(event.models) }
+                postToMain { onModelsLoaded(event.models, event.hasViewUsage) }
             }
 
             is BridgeEvent.ModelSubOptions -> {
@@ -174,6 +174,10 @@ class AntigravityWebBridge(
 
     fun selectModel(option: ModelOption) {
         postToComposerFrame(ComposerBridgeProtocol.encodeSelectModel(option.fullText, option.name))
+    }
+
+    fun openUsage() {
+        postToComposerFrame(ComposerBridgeProtocol.encodeSimpleCommand("openUsage"))
     }
 
     fun selectModelSubOption(

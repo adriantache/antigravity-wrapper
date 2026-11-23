@@ -236,6 +236,7 @@ fun AntigravityApp(
     var showModelSheet by remember { mutableStateOf(false) }
     var isLoadingModels by remember { mutableStateOf(false) }
     var availableModels by remember { mutableStateOf<List<ModelOption>>(emptyList()) }
+    var hasViewUsageOption by remember { mutableStateOf(false) }
     var modelSubParentName by remember { mutableStateOf<String?>(null) }
     var modelSubParentFullText by remember { mutableStateOf<String?>(null) }
     var modelSubOptions by remember { mutableStateOf<List<ModelOption>>(emptyList()) }
@@ -252,8 +253,9 @@ fun AntigravityApp(
             onComposerStateChanged = { state ->
                 composerState = state
             },
-            onModelsLoaded = { models ->
+            onModelsLoaded = { models, hasViewUsage ->
                 availableModels = models
+                hasViewUsageOption = hasViewUsage
                 modelSubParentName = null
                 modelSubParentFullText = null
                 modelSubOptions = emptyList()
@@ -790,6 +792,7 @@ fun AntigravityApp(
                 ModelPickerBottomSheet(
                     models = availableModels,
                     isLoading = isLoadingModels,
+                    hasViewUsage = hasViewUsageOption,
                     subOptionsTitle = modelSubParentName,
                     subOptions = modelSubOptions,
                     onBackFromSubOptions = {
@@ -806,6 +809,14 @@ fun AntigravityApp(
                         val pName = modelSubParentName ?: pFull
                         isLoadingModels = true
                         webBridge.selectModelSubOption(pFull, pName, subOption)
+                    },
+                    onOpenUsage = {
+                        showModelSheet = false
+                        isLoadingModels = false
+                        modelSubParentName = null
+                        modelSubParentFullText = null
+                        modelSubOptions = emptyList()
+                        webBridge.openUsage()
                     },
                     onDismiss = {
                         showModelSheet = false

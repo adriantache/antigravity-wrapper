@@ -25,10 +25,12 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -480,11 +482,13 @@ private fun ComposerSelectorChip(
 fun ModelPickerBottomSheet(
     models: List<ModelOption>,
     isLoading: Boolean,
+    hasViewUsage: Boolean = false,
     subOptionsTitle: String? = null,
     subOptions: List<ModelOption> = emptyList(),
     onBackFromSubOptions: () -> Unit = {},
     onSelect: (ModelOption) -> Unit,
     onSelectSubOption: (ModelOption) -> Unit = {},
+    onOpenUsage: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -644,6 +648,38 @@ fun ModelPickerBottomSheet(
                                     )
                                 }
                             }
+                        }
+                    }
+
+                    if (!showingSubOptions && hasViewUsage) {
+                        HorizontalDivider(color = ComposerBorder)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(onClick = onOpenUsage)
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BarChart,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "View Usage",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = ComposerMutedText,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }

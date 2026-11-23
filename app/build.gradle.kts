@@ -16,8 +16,8 @@ android {
         applicationId = "com.adriantache.antigravitywrapper"
         minSdk = 35
         targetSdk = 37
-        versionCode = 10108
-        versionName = "1.1.8"
+        versionCode = 10109
+        versionName = "1.1.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -46,6 +46,7 @@ class ComposerBridgeProtocolTest {
         val raw = """
             {
               "type": "modelsList",
+              "hasViewUsage": true,
               "models": [
                 {
                   "name": "Gemini 4 Neon",
@@ -68,6 +69,7 @@ class ComposerBridgeProtocolTest {
         """.trimIndent()
 
         val event = ComposerBridgeProtocol.parseEvent(raw) as BridgeEvent.ModelsLoaded
+        assertTrue(event.hasViewUsage)
         assertEquals(2, event.models.size)
 
         val first = event.models[0]
@@ -89,6 +91,7 @@ class ComposerBridgeProtocolTest {
         val raw = """
             {
               "type": "modelsList",
+              "hasViewUsage": true,
               "models": [
                 {
                   "name": "Gemini 4 Neon\nHigh",
