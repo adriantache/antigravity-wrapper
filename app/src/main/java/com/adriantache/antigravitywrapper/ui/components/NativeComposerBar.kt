@@ -1,0 +1,553 @@
+package com.adriantache.antigravitywrapper.ui.components
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.adriantache.antigravitywrapper.bridge.ComposerState
+import com.adriantache.antigravitywrapper.bridge.ModelOption
+import com.adriantache.antigravitywrapper.bridge.PermissionOption
+
+private val ComposerBackdrop = Color(0xFF101010)
+private val ComposerCardBg = Color(0xFF1A1A1D)
+private val ComposerBorder = Color(0xFF2D2D32)
+private val ComposerChipBg = Color(0xFF242429)
+private val ComposerMutedText = Color(0xFF9A9AA2)
+
+@Composable
+fun NativeComposerBar(
+    modifier: Modifier = Modifier,
+    text: String,
+    onTextChange: (String) -> Unit,
+    composerState: ComposerState,
+    isSending: Boolean,
+    showVoiceButton: Boolean,
+    onSend: () -> Unit,
+    onStop: () -> Unit,
+    onOpenModelPicker: () -> Unit,
+    onOpenPermissionsPicker: () -> Unit,
+    onAttachClick: () -> Unit,
+    onVoiceClick: () -> Unit,
+    onSwitchToWebComposer: () -> Unit
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = ComposerBackdrop,
+        tonalElevation = 0.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = ComposerCardBg,
+                border = BorderStroke(1.dp, ComposerBorder)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Top bar: Model selector chip, Permissions chip, and Switch-to-Web button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (composerState.currentModel.isNotBlank()) {
+                                ComposerSelectorChip(
+                                    icon = Icons.Default.AutoAwesome,
+                                    label = composerState.currentModel,
+                                    onClick = onOpenModelPicker
+                                )
+                            }
+
+                            if (composerState.currentPermissions.isNotBlank()) {
+                                ComposerSelectorChip(
+                                    icon = Icons.Default.Shield,
+                                    label = composerState.currentPermissions,
+                                    onClick = onOpenPermissionsPicker
+                                )
+                            }
+                        }
+
+                        // Quick fallback to the web composer (e.g. for @ mentions or / slash commands)
+                        IconButton(
+                            onClick = onSwitchToWebComposer,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Switch to web input",
+                                tint = ComposerMutedText,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+
+                    // Bottom bar: Attach + Native TextField + Optional Voice + Large Send/Stop
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (composerState.hasAttach) {
+                            IconButton(
+                                onClick = onAttachClick,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(ComposerChipBg)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Attach file",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Native Compose TextField for buttery 120Hz typing
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 42.dp, max = 148.dp)
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    text = "Ask anything…",
+                                    style = TextStyle(
+                                        color = ComposerMutedText,
+                                        fontSize = 15.sp,
+                                        lineHeight = 21.sp
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = text,
+                                onValueChange = onTextChange,
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 15.sp,
+                                    lineHeight = 21.sp
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                keyboardOptions = KeyboardOptions(
+                                    capitalization = KeyboardCapitalization.Sentences
+                                ),
+                                maxLines = 6
+                            )
+                        }
+
+                        // Optional Voice button (off by default, clearly spaced away from Send)
+                        if (showVoiceButton && composerState.hasVoiceButton) {
+                            IconButton(
+                                onClick = onVoiceClick,
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(ComposerChipBg)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Mic,
+                                    contentDescription = "Record voice memo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(2.dp))
+                        }
+
+                        // Large 46dp Send / Stop button
+                        val showStop = composerState.isGenerating && text.isBlank() && !isSending
+                        val canSend = text.isNotBlank() && !isSending
+                        val buttonColor = when {
+                            showStop -> Color(0xFFD94A4A)
+                            canSend -> MaterialTheme.colorScheme.primary
+                            else -> ComposerChipBg
+                        }
+                        val iconTint = when {
+                            showStop -> Color.White
+                            canSend -> MaterialTheme.colorScheme.onPrimary
+                            else -> ComposerMutedText
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(buttonColor)
+                                .clickable(enabled = showStop || canSend) {
+                                    if (showStop) onStop() else onSend()
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            when {
+                                isSending -> CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                                showStop -> Icon(
+                                    imageVector = Icons.Default.Stop,
+                                    contentDescription = "Stop generating",
+                                    tint = iconTint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                else -> Icon(
+                                    imageVector = Icons.Default.ArrowUpward,
+                                    contentDescription = "Send message",
+                                    tint = iconTint,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerSelectorChip(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = ComposerChipBg,
+        modifier = Modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(14.dp)
+            )
+            Text(
+                text = label,
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = ComposerMutedText,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ModelPickerBottomSheet(
+    models: List<ModelOption>,
+    isLoading: Boolean,
+    onSelect: (ModelOption) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ComposerCardBg,
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = "Select Model",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
+            HorizontalDivider(color = ComposerBorder)
+
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                    }
+                }
+                models.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No models available right now.",
+                            color = ComposerMutedText,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 420.dp)
+                    ) {
+                        items(models) { option ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (option.isDisabled) 0.45f else 1f)
+                                    .clickable(enabled = !option.isDisabled) { onSelect(option) }
+                                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = option.name,
+                                            color = Color.White,
+                                            fontSize = 15.sp,
+                                            fontWeight = if (option.isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (option.effort.isNotBlank()) {
+                                            Text(
+                                                text = option.effort,
+                                                color = ComposerMutedText,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (option.badge.isNotBlank()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = ComposerChipBg
+                                    ) {
+                                        Text(
+                                            text = option.badge,
+                                            color = if (option.badge.equals("New", ignoreCase = true)) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                ComposerMutedText
+                                            },
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                        )
+                                    }
+                                }
+
+                                if (option.isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PermissionsPickerBottomSheet(
+    options: List<PermissionOption>,
+    isLoading: Boolean,
+    onSelect: (PermissionOption) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = ComposerCardBg,
+        contentColor = Color.White
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                text = "Agent Permissions",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+            )
+            HorizontalDivider(color = ComposerBorder)
+
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                    }
+                }
+                options.isEmpty() -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No permission presets found.",
+                            color = ComposerMutedText,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp)
+                    ) {
+                        items(options) { option ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onSelect(option) }
+                                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = option.label,
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = if (option.isSelected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
+                                    if (option.description.isNotBlank()) {
+                                        Text(
+                                            text = option.description,
+                                            color = ComposerMutedText,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                                if (option.isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

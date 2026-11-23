@@ -4,6 +4,8 @@ import com.adriantache.antigravitywrapper.data.PreferencesManager
 import com.adriantache.antigravitywrapper.util.UrlNavigationAction
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UrlPolicyTest {
@@ -213,6 +215,35 @@ class UrlPolicyTest {
         assertEquals(
             UrlNavigationAction.OPEN_EXTERNALLY,
             UrlPolicy.classifyNavigation("tel", null, -1, true, defaultServer)
+        )
+    }
+
+    @Test
+    fun trustedBridgeOrigins_allowAntigravityIframeAndConfiguredServerOnly() {
+        assertTrue(
+            UrlPolicy.isTrustedBridgeOrigin("https://antigravity.static.usercontent.goog", defaultServer)
+        )
+        assertTrue(
+            UrlPolicy.isTrustedBridgeOrigin("https://antigravity.google.com", defaultServer)
+        )
+        assertTrue(
+            UrlPolicy.isTrustedBridgeOrigin("https://antigravity.google", defaultServer)
+        )
+        assertTrue(
+            UrlPolicy.isTrustedBridgeOrigin("http://192.168.1.50:8080", "http://192.168.1.50:8080/session")
+        )
+
+        assertFalse(
+            UrlPolicy.isTrustedBridgeOrigin("https://accounts.google.com", defaultServer)
+        )
+        assertFalse(
+            UrlPolicy.isTrustedBridgeOrigin("http://antigravity.static.usercontent.goog", defaultServer)
+        )
+        assertFalse(
+            UrlPolicy.isTrustedBridgeOrigin("https://evil.example.com", defaultServer)
+        )
+        assertFalse(
+            UrlPolicy.isTrustedBridgeOrigin(null, defaultServer)
         )
     }
 }

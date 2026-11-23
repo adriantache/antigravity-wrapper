@@ -66,6 +66,30 @@ object UrlPolicy {
             host.endsWith(".antigravity.google.com")
     }
 
+    private fun isAntigravityStaticHost(host: String): Boolean {
+        return host == "antigravity.static.usercontent.goog" ||
+            host.endsWith(".antigravity.static.usercontent.goog")
+    }
+
+    /**
+     * Checks whether a WebMessage origin (including cross-origin Antigravity iframes) is
+     * trusted to communicate with the native composer and notification bridge.
+     */
+    fun isTrustedBridgeOrigin(origin: String?, configuredServerUrl: String): Boolean {
+        val endpoint = extractEndpoint(origin.orEmpty()) ?: return false
+        if (endpoint.scheme == "https" &&
+            (isAntigravityHost(endpoint.host) || isAntigravityStaticHost(endpoint.host))
+        ) {
+            return true
+        }
+        return matchesConfiguredServer(
+            requestScheme = endpoint.scheme,
+            requestHost = endpoint.host,
+            requestExplicitPort = endpoint.explicitPort,
+            configuredServerUrl = configuredServerUrl
+        )
+    }
+
     private fun matchesConfiguredServer(
         requestScheme: String,
         requestHost: String,

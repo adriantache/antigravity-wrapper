@@ -17,11 +17,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Web
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +47,9 @@ import kotlin.math.roundToInt
 @Composable
 fun FloatingControlPill(
     modifier: Modifier = Modifier,
+    showComposerToggle: Boolean = false,
+    isNativeComposerEnabled: Boolean = true,
+    onToggleNativeComposer: () -> Unit = {},
     onRefresh: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
@@ -91,6 +94,31 @@ fun FloatingControlPill(
                     exit = fadeOut() + scaleOut()
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (showComposerToggle) {
+                            IconButton(
+                                onClick = {
+                                    onToggleNativeComposer()
+                                    isExpanded = false
+                                },
+                                modifier = Modifier.size(38.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isNativeComposerEnabled) Icons.Default.Web else Icons.Default.Keyboard,
+                                    contentDescription = if (isNativeComposerEnabled) {
+                                        "Switch to Web Input"
+                                    } else {
+                                        "Switch to Native Input"
+                                    },
+                                    modifier = Modifier.size(20.dp),
+                                    tint = if (isNativeComposerEnabled) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    }
+                                )
+                            }
+                        }
+
                         IconButton(
                             onClick = {
                                 onRefresh()

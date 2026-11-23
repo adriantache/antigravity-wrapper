@@ -14,6 +14,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
         private const val KEY_PULL_TO_REFRESH = "pull_to_refresh"
         private const val KEY_DOUBLE_BACK_EXIT = "double_back_exit"
+        private const val KEY_NATIVE_COMPOSER = "native_composer"
+        private const val KEY_SHOW_VOICE_BUTTON = "show_voice_button"
 
         const val DEFAULT_URL = "https://antigravity.google.com/remote?path=%2Fview%2Fremote-control"
     }
@@ -67,4 +69,12 @@ class PreferencesManager(context: Context) {
     var isDoubleBackExitEnabled: Boolean
         get() = prefs.getBoolean(KEY_DOUBLE_BACK_EXIT, true)
         set(value) = prefs.edit().putBoolean(KEY_DOUBLE_BACK_EXIT, value).apply()
+
+    var isNativeComposerEnabled: Boolean
+        get() = prefs.getBoolean(KEY_NATIVE_COMPOSER, true)
+        set(value) = prefs.edit().putBoolean(KEY_NATIVE_COMPOSER, value).apply()
+
+    var isShowVoiceButtonEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_VOICE_BUTTON, false)
+        set(value) = prefs.edit().putBoolean(KEY_SHOW_VOICE_BUTTON, value).apply()
 }

@@ -21,13 +21,18 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationTarget
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -42,24 +47,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
+import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
+import com.adriantache.antigravitywrapper.bridge.BridgeConfig
+import com.adriantache.antigravitywrapper.bridge.ComposerState
+import com.adriantache.antigravitywrapper.bridge.ModelOption
+import com.adriantache.antigravitywrapper.bridge.PermissionOption
 import com.adriantache.antigravitywrapper.data.PreferencesManager
 import com.adriantache.antigravitywrapper.ui.components.AntigravityWebView
 import com.adriantache.antigravitywrapper.ui.components.ConnectionErrorOverlay
 import com.adriantache.antigravitywrapper.ui.components.FloatingControlPill
+import com.adriantache.antigravitywrapper.ui.components.ModelPickerBottomSheet
+import com.adriantache.antigravitywrapper.ui.components.NativeComposerBar
+import com.adriantache.antigravitywrapper.ui.components.PermissionsPickerBottomSheet
 import com.adriantache.antigravitywrapper.ui.components.SettingsDialog
 import com.adriantache.antigravitywrapper.ui.components.dispatchEscapeEvent
 import com.adriantache.antigravitywrapper.ui.theme.AntigravityWrapperTheme
@@ -122,7 +139,7 @@ class MainActivity : ComponentActivity() {
             try {
                 intent?.data = null
                 intent?.replaceExtras(null)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Ignore if intent is immutable
             }
         }
@@ -147,13 +164,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AntigravityApp(
     activity: MainActivity,
     preferencesManager: PreferencesManager
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val isTablet = configuration.screenWidthDp >= 600
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -161,20 +181,103 @@ fun AntigravityApp(
     var currentUrl by remember {
         mutableStateOf(activity.incomingUrl.value ?: preferencesManager.serverUrl)
     }
+    val latestConfiguredUrl by rememberUpdatedState(currentUrl)
+
     var isDesktopMode by remember { mutableStateOf(preferencesManager.isDesktopMode) }
     var isKeepScreenOn by remember { mutableStateOf(preferencesManager.isKeepScreenOn) }
     var isPullToRefreshEnabled by remember { mutableStateOf(preferencesManager.isPullToRefreshEnabled) }
+    var isNativeComposerEnabled by remember { mutableStateOf(preferencesManager.isNativeComposerEnabled) }
+    var isShowVoiceButtonEnabled by remember { mutableStateOf(preferencesManager.isShowVoiceButtonEnabled) }
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var pageProgress by remember { mutableIntStateOf(0) }
     var isPageLoading by remember { mutableStateOf(true) }
-    var canScrollUp by remember { mutableStateOf(false) }
+    var webViewRootCanScrollUp by remember { mutableStateOf(false) }
+    var innerSpaCanScrollUp by remember { mutableStateOf(false) }
 
     // Connection error state
     var hasConnectionError by remember { mutableStateOf(false) }
     var connectionErrorMessage by remember { mutableStateOf("") }
     var failingUrl by remember { mutableStateOf("") }
+
+    // Native composer & bridge state
+    var composerState by remember { mutableStateOf(ComposerState()) }
+    var draftText by rememberSaveable { mutableStateOf("") }
+    var isSendingMessage by remember { mutableStateOf(false) }
+    var composerHeightPx by remember { mutableIntStateOf(0) }
+
+    // Model & permissions bottom sheet state
+    var showModelSheet by remember { mutableStateOf(false) }
+    var isLoadingModels by remember { mutableStateOf(false) }
+    var availableModels by remember { mutableStateOf<List<ModelOption>>(emptyList()) }
+
+    var showPermissionsSheet by remember { mutableStateOf(false) }
+    var isLoadingPermissions by remember { mutableStateOf(false) }
+    var availablePermissions by remember { mutableStateOf<List<PermissionOption>>(emptyList()) }
+
+    // Bidirectional WebMessage bridge to the Antigravity iframe
+    val webBridge = remember(context) {
+        AntigravityWebBridge(
+            context = context.applicationContext,
+            configuredServerUrlProvider = { latestConfiguredUrl },
+            onComposerStateChanged = { state ->
+                composerState = state
+            },
+            onModelsLoaded = { models ->
+                availableModels = models
+                isLoadingModels = false
+            },
+            onPermissionsLoaded = { options ->
+                availablePermissions = options
+                isLoadingPermissions = false
+            },
+            onScrollStateChanged = { canScroll ->
+                innerSpaCanScrollUp = canScroll
+            },
+            onSendResult = { ok, error ->
+                isSendingMessage = false
+                if (ok) {
+                    draftText = ""
+                } else {
+                    coroutineScope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        snackbarHostState.showSnackbar(
+                            message = error?.ifBlank { null }
+                                ?: "Couldn't send message — your draft was kept",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    // Push live config updates into the iframe whenever toggles or screen width change
+    LaunchedEffect(isNativeComposerEnabled, isShowVoiceButtonEnabled, isTablet) {
+        webBridge.updateConfig(
+            BridgeConfig(
+                nativeComposerEnabled = isNativeComposerEnabled,
+                showVoiceButton = isShowVoiceButtonEnabled,
+                isTablet = isTablet,
+                enhancedWebComposer = true
+            )
+        )
+    }
+
+    // Guard against stuck sending spinner if iframe navigates mid-send
+    LaunchedEffect(isSendingMessage) {
+        if (isSendingMessage) {
+            delay(3000L)
+            if (isSendingMessage) {
+                isSendingMessage = false
+                snackbarHostState.showSnackbar(
+                    message = "Send timed out — your draft was kept",
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
+    }
 
     LaunchedEffect(pendingIncomingUrl) {
         pendingIncomingUrl?.let { url ->
@@ -219,7 +322,7 @@ fun AntigravityApp(
         onDispose {
             try {
                 connectivityManager.unregisterNetworkCallback(networkCallback)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // Ignore unregister exceptions
             }
         }
@@ -227,6 +330,14 @@ fun AntigravityApp(
 
     // Back gesture interception
     BackHandler(enabled = true) {
+        if (showModelSheet) {
+            showModelSheet = false
+            return@BackHandler
+        }
+        if (showPermissionsSheet) {
+            showPermissionsSheet = false
+            return@BackHandler
+        }
         if (showSettingsDialog) {
             showSettingsDialog = false
             return@BackHandler
@@ -243,7 +354,8 @@ fun AntigravityApp(
                 activity.finish()
             } else {
                 lastBackPressTime = currentTime
-                // Send Escape key into web interface DOM to dismiss dropdowns/popups/palettes
+                // Send Escape into both the cross-origin iframe and outer frame
+                webBridge.dispatchEscape()
                 webViewInstance?.dispatchEscapeEvent()
                 coroutineScope.launch {
                     snackbarHostState.currentSnackbarData?.dismiss()
@@ -258,12 +370,41 @@ fun AntigravityApp(
         }
     }
 
+    // Compute IME insets separately so WebView snaps ONCE to target IME height (eliminating
+    // 60-120Hz Chromium reflow jank) while the lightweight Compose composer animates smoothly.
+    val systemBarBottomPx = WindowInsets.systemBars.getBottom(density)
+    val imeTargetOverlapDp = with(density) {
+        (WindowInsets.imeAnimationTarget.getBottom(density) - systemBarBottomPx)
+            .coerceAtLeast(0)
+            .toDp()
+    }
+    val imeCurrentOverlapDp = with(density) {
+        (WindowInsets.ime.getBottom(density) - systemBarBottomPx)
+            .coerceAtLeast(0)
+            .toDp()
+    }
+    val isImeVisible = WindowInsets.isImeVisible
+
+    val showNativeComposer = isNativeComposerEnabled &&
+        composerState.hasComposer &&
+        !hasConnectionError
+    val composerHeightDp = with(density) { composerHeightPx.toDp() }
+    val canScrollUp = webViewRootCanScrollUp || innerSpaCanScrollUp
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = Color(0xFF101010),
         contentColor = Color.White,
-        contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        // Exclude animated IME from Scaffold so WebView isn't resized every animation frame
+        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout),
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.padding(
+                    bottom = (if (showNativeComposer) composerHeightDp else 0.dp) + imeCurrentOverlapDp
+                )
+            )
+        }
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -276,10 +417,13 @@ fun AntigravityApp(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(
+                        bottom = (if (showNativeComposer) composerHeightDp else 0.dp) + imeTargetOverlapDp
+                    )
                     .pullToRefresh(
                         isRefreshing = isRefreshing,
                         state = pullRefreshState,
-                        enabled = isPullToRefreshEnabled && !canScrollUp,
+                        enabled = isPullToRefreshEnabled && !canScrollUp && !isImeVisible,
                         onRefresh = {
                             isRefreshing = true
                             hasConnectionError = false
@@ -291,6 +435,7 @@ fun AntigravityApp(
                     modifier = Modifier.fillMaxSize(),
                     url = currentUrl,
                     isDesktopMode = isDesktopMode,
+                    bridge = webBridge,
                     onWebViewCreated = { webView ->
                         webViewInstance = webView
                     },
@@ -317,7 +462,7 @@ fun AntigravityApp(
                         isPageLoading = false
                     },
                     onScrollChanged = { canScroll ->
-                        canScrollUp = canScroll
+                        webViewRootCanScrollUp = canScroll
                     }
                 )
 
@@ -328,6 +473,70 @@ fun AntigravityApp(
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
                 }
+            }
+
+            // Native Jetpack Compose Composer Bar (slides smoothly with keyboard at full refresh rate)
+            if (showNativeComposer) {
+                NativeComposerBar(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = imeCurrentOverlapDp)
+                        .onGloballyPositioned { coords ->
+                            composerHeightPx = coords.size.height
+                        },
+                    text = draftText,
+                    onTextChange = { draftText = it },
+                    composerState = composerState,
+                    isSending = isSendingMessage,
+                    showVoiceButton = isShowVoiceButtonEnabled,
+                    onSend = {
+                        val trimmed = draftText.trim()
+                        if (trimmed.isNotEmpty() && !isSendingMessage) {
+                            isSendingMessage = true
+                            val posted = webBridge.sendMessage(draftText)
+                            if (!posted) {
+                                isSendingMessage = false
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Session not ready yet")
+                                }
+                            }
+                        }
+                    },
+                    onStop = {
+                        webBridge.stopGeneration()
+                    },
+                    onOpenModelPicker = {
+                        showModelSheet = true
+                        isLoadingModels = true
+                        if (!webBridge.requestModels()) {
+                            isLoadingModels = false
+                        }
+                    },
+                    onOpenPermissionsPicker = {
+                        showPermissionsSheet = true
+                        isLoadingPermissions = true
+                        if (!webBridge.requestPermissions()) {
+                            isLoadingPermissions = false
+                        }
+                    },
+                    onAttachClick = {
+                        webBridge.triggerAttach()
+                    },
+                    onVoiceClick = {
+                        webBridge.triggerVoice()
+                    },
+                    onSwitchToWebComposer = {
+                        isNativeComposerEnabled = false
+                        preferencesManager.isNativeComposerEnabled = false
+                        coroutineScope.launch {
+                            snackbarHostState.currentSnackbarData?.dismiss()
+                            snackbarHostState.showSnackbar(
+                                message = "Switched to web input (use ⋮ to switch back)",
+                                duration = SnackbarDuration.Short
+                            )
+                        }
+                    }
+                )
             }
 
             // Top progress bar during page load
@@ -373,6 +582,13 @@ fun AntigravityApp(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(end = 16.dp, top = 16.dp),
+                showComposerToggle = composerState.hasComposer && !hasConnectionError,
+                isNativeComposerEnabled = isNativeComposerEnabled,
+                onToggleNativeComposer = {
+                    val next = !isNativeComposerEnabled
+                    isNativeComposerEnabled = next
+                    preferencesManager.isNativeComposerEnabled = next
+                },
                 onRefresh = {
                     hasConnectionError = false
                     webViewInstance?.reload()
@@ -381,6 +597,32 @@ fun AntigravityApp(
                     showSettingsDialog = true
                 }
             )
+
+            // Native Model Picker Bottom Sheet
+            if (showModelSheet) {
+                ModelPickerBottomSheet(
+                    models = availableModels,
+                    isLoading = isLoadingModels,
+                    onSelect = { option ->
+                        showModelSheet = false
+                        webBridge.selectModel(option)
+                    },
+                    onDismiss = { showModelSheet = false }
+                )
+            }
+
+            // Native Permissions Picker Bottom Sheet
+            if (showPermissionsSheet) {
+                PermissionsPickerBottomSheet(
+                    options = availablePermissions,
+                    isLoading = isLoadingPermissions,
+                    onSelect = { option ->
+                        showPermissionsSheet = false
+                        webBridge.selectPermission(option)
+                    },
+                    onDismiss = { showPermissionsSheet = false }
+                )
+            }
 
             // Settings Dialog
             if (showSettingsDialog) {
@@ -391,11 +633,19 @@ fun AntigravityApp(
                     onSaveAndConnect = { newUrl ->
                         showSettingsDialog = false
                         hasConnectionError = false
+                        val urlChanged = newUrl != currentUrl
+                        val desktopChanged = preferencesManager.isDesktopMode != isDesktopMode
                         currentUrl = newUrl
                         isDesktopMode = preferencesManager.isDesktopMode
                         isKeepScreenOn = preferencesManager.isKeepScreenOn
                         isPullToRefreshEnabled = preferencesManager.isPullToRefreshEnabled
-                        webViewInstance?.loadUrl(newUrl)
+                        isNativeComposerEnabled = preferencesManager.isNativeComposerEnabled
+                        isShowVoiceButtonEnabled = preferencesManager.isShowVoiceButtonEnabled
+                        if (urlChanged) {
+                            webViewInstance?.loadUrl(newUrl)
+                        } else if (desktopChanged) {
+                            webViewInstance?.reload()
+                        }
                     },
                     onClearCache = {
                         webViewInstance?.clearCache(true)

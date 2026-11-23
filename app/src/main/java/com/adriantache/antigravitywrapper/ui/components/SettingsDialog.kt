@@ -11,9 +11,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
@@ -57,7 +57,9 @@ fun SettingsDialog(
     var isKeepScreenOn by remember { mutableStateOf(preferencesManager.isKeepScreenOn) }
     var isPullToRefresh by remember { mutableStateOf(preferencesManager.isPullToRefreshEnabled) }
     var isDoubleBack by remember { mutableStateOf(preferencesManager.isDoubleBackExitEnabled) }
-    val recentUrls = remember { preferencesManager.recentUrls }
+    var isNativeComposer by remember { mutableStateOf(preferencesManager.isNativeComposerEnabled) }
+    var isShowVoiceButton by remember { mutableStateOf(preferencesManager.isShowVoiceButtonEnabled) }
+    var recentUrls by remember { mutableStateOf(preferencesManager.recentUrls) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -71,6 +73,7 @@ fun SettingsDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
@@ -117,7 +120,10 @@ fun SettingsDialog(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             IconButton(
-                                onClick = { preferencesManager.clearRecentUrls() },
+                                onClick = {
+                                    preferencesManager.clearRecentUrls()
+                                    recentUrls = emptyList()
+                                },
                                 modifier = Modifier.size(24.dp)
                             ) {
                                 Icon(
@@ -128,12 +134,13 @@ fun SettingsDialog(
                             }
                         }
 
-                        LazyColumn(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(max = 110.dp)
+                                .verticalScroll(rememberScrollState())
                         ) {
-                            items(recentUrls) { recent ->
+                            recentUrls.forEach { recent ->
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -169,6 +176,22 @@ fun SettingsDialog(
                 }
 
                 HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.4f))
+
+                // Toggle: Native Input Bar
+                SettingToggleRow(
+                    title = "Native Input Bar",
+                    subtitle = "Smooth native typing, larger Send button & model picker",
+                    checked = isNativeComposer,
+                    onCheckedChange = { isNativeComposer = it }
+                )
+
+                // Toggle: Show Voice Button
+                SettingToggleRow(
+                    title = "Show Voice Button",
+                    subtitle = "Display voice memo button in the input bar",
+                    checked = isShowVoiceButton,
+                    onCheckedChange = { isShowVoiceButton = it }
+                )
 
                 // Toggle: Double Back to Exit
                 SettingToggleRow(
@@ -218,6 +241,8 @@ fun SettingsDialog(
                     preferencesManager.isKeepScreenOn = isKeepScreenOn
                     preferencesManager.isPullToRefreshEnabled = isPullToRefresh
                     preferencesManager.isDoubleBackExitEnabled = isDoubleBack
+                    preferencesManager.isNativeComposerEnabled = isNativeComposer
+                    preferencesManager.isShowVoiceButtonEnabled = isShowVoiceButton
 
                     var finalUrl = urlInput.trim()
                     if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {

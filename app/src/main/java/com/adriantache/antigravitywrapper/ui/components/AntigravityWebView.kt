@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlNavigationAction
 import com.adriantache.antigravitywrapper.util.UrlPolicy
@@ -95,6 +96,7 @@ fun AntigravityWebView(
     modifier: Modifier = Modifier,
     url: String,
     isDesktopMode: Boolean,
+    bridge: AntigravityWebBridge? = null,
     onWebViewCreated: (WebView) -> Unit = {},
     onPageStarted: () -> Unit = {},
     onPageFinished: () -> Unit = {},
@@ -192,6 +194,7 @@ fun AntigravityWebView(
 
                 val webView = this
                 addJavascriptInterface(WebNotificationBridge(context), "_AntigravityNotifier")
+                bridge?.attachTo(webView)
                 CookieManager.getInstance().apply {
                     setAcceptCookie(true)
                     setAcceptThirdPartyCookies(webView, true)
@@ -233,6 +236,7 @@ fun AntigravityWebView(
                     }
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
+                        bridge?.resetForNavigation()
                         view?.evaluateJavascript(NOTIFICATION_POLYFILL_JS, null)
                         onPageStarted()
                     }
