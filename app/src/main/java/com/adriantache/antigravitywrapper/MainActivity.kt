@@ -35,9 +35,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +93,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
@@ -216,6 +219,7 @@ fun AntigravityApp(
     var isAttachingFiles by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
     var composerHeightPx by remember { mutableIntStateOf(0) }
+    var containerWidthPx by remember { mutableIntStateOf(0) }
 
     // Model & permissions bottom sheet state
     var showModelSheet by remember { mutableStateOf(false) }
@@ -325,14 +329,28 @@ fun AntigravityApp(
         }
     }
 
-    // Push live config updates into the iframe whenever toggles or screen width change
-    LaunchedEffect(isNativeComposerEnabled, isShowVoiceButtonEnabled, isTablet) {
+    val showNativeComposer = isNativeComposerEnabled &&
+        composerState.hasComposer &&
+        !hasConnectionError
+    val composerHeightDp = with(density) { composerHeightPx.toDp() }
+    val isSplitLayout = showNativeComposer &&
+        isTablet &&
+        (composerState.composerLeftFraction >= 0.06f || composerState.composerRightFraction <= 0.94f)
+    val composerSpacerPx = if (isSplitLayout) {
+        composerHeightDp.value.roundToInt().coerceAtLeast(0)
+    } else {
+        0
+    }
+
+    // Push live config updates into the iframe whenever toggles, screen width, or split-view spacer change
+    LaunchedEffect(isNativeComposerEnabled, isShowVoiceButtonEnabled, isTablet, composerSpacerPx) {
         webBridge.updateConfig(
             BridgeConfig(
                 nativeComposerEnabled = isNativeComposerEnabled,
                 showVoiceButton = isShowVoiceButtonEnabled,
                 isTablet = isTablet,
-                enhancedWebComposer = true
+                enhancedWebComposer = true,
+                composerSpacerPx = composerSpacerPx
             )
         )
     }
@@ -480,11 +498,6 @@ fun AntigravityApp(
             .toDp()
     }
     val isImeVisible = WindowInsets.isImeVisible
-
-    val showNativeComposer = isNativeComposerEnabled &&
-        composerState.hasComposer &&
-        !hasConnectionError
-    val composerHeightDp = with(density) { composerHeightPx.toDp() }
     val canScrollUp = webViewRootCanScrollUp || innerSpaCanScrollUp
 
     Scaffold(
@@ -507,6 +520,9 @@ fun AntigravityApp(
                 .fillMaxSize()
                 .background(Color(0xFF101010))
                 .padding(innerPadding)
+                .onGloballyPositioned { coords ->
+                    containerWidthPx = coords.size.width
+                }
         ) {
             val pullRefreshState = rememberPullToRefreshState()
 
@@ -514,7 +530,10 @@ fun AntigravityApp(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(
-                        bottom = (if (showNativeComposer) composerHeightDp else 0.dp) + imeTargetOverlapDp
+                        // In tablet split-view, the chat column itself reserves composerSpacerPx so
+                        // the left conversations sidebar stays full-height and interactive.
+                        bottom = (if (showNativeComposer && !isSplitLayout) composerHeightDp else 0.dp) +
+                            imeTargetOverlapDp
                     )
                     .pullToRefresh(
                         isRefreshing = isRefreshing,
@@ -575,13 +594,34 @@ fun AntigravityApp(
 
             // Native Jetpack Compose Composer Bar (slides smoothly with keyboard at full refresh rate)
             if (showNativeComposer) {
-                NativeComposerBar(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
+                val containerWidthDp = with(density) { containerWidthPx.toDp() }
+                val composerModifier = if (isSplitLayout && containerWidthPx > 0) {
+                    val rawStartDp = containerWidthDp * composerState.composerLeftFraction
+                    val rawEndDp = containerWidthDp * composerState.composerRightFraction
+                    val minBarWidthDp = 320.dp.coerceAtMost(containerWidthDp)
+                    val barWidthDp = (rawEndDp - rawStartDp)
+                        .coerceAtLeast(minBarWidthDp)
+                        .coerceAtMost(containerWidthDp)
+                    val barStartDp = rawStartDp.coerceIn(
+                        0.dp,
+                        (containerWidthDp - barWidthDp).coerceAtLeast(0.dp)
+                    )
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .offset(x = barStartDp)
+                        .width(barWidthDp)
                         .padding(bottom = imeCurrentOverlapDp)
-                        .onGloballyPositioned { coords ->
-                            composerHeightPx = coords.size.height
-                        },
+                } else {
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(bottom = imeCurrentOverlapDp)
+                }
+
+                NativeComposerBar(
+                    modifier = composerModifier.onGloballyPositioned { coords ->
+                        composerHeightPx = coords.size.height
+                    },
                     text = draftText,
                     onTextChange = { draftText = it },
                     composerState = composerState,
@@ -589,6 +629,7 @@ fun AntigravityApp(
                     isAttaching = isAttachingFiles,
                     isSending = isSendingMessage,
                     showVoiceButton = isShowVoiceButtonEnabled,
+                    isFloatingOverlay = isSplitLayout,
                     onSend = {
                         val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
                         if (hasContent && !isSendingMessage) {

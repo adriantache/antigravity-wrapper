@@ -79,6 +79,7 @@ fun NativeComposerBar(
     isAttaching: Boolean = false,
     isSending: Boolean,
     showVoiceButton: Boolean,
+    isFloatingOverlay: Boolean = false,
     onSend: () -> Unit,
     onStop: () -> Unit,
     onOpenModelPicker: () -> Unit,
@@ -90,7 +91,7 @@ fun NativeComposerBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = ComposerBackdrop,
+        color = if (isFloatingOverlay) Color.Transparent else ComposerBackdrop,
         tonalElevation = 0.dp
     ) {
         Column(
@@ -102,7 +103,8 @@ fun NativeComposerBar(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
                 color = ComposerCardBg,
-                border = BorderStroke(1.dp, ComposerBorder)
+                border = BorderStroke(1.dp, ComposerBorder),
+                shadowElevation = if (isFloatingOverlay) 8.dp else 0.dp
             ) {
                 Column(
                     modifier = Modifier

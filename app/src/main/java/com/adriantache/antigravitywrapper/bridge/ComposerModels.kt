@@ -9,7 +9,9 @@ data class ComposerState(
     val currentPermissions: String = "",
     val isGenerating: Boolean = false,
     val hasVoiceButton: Boolean = false,
-    val hasAttach: Boolean = false
+    val hasAttach: Boolean = false,
+    val composerLeftFraction: Float = 0f,
+    val composerRightFraction: Float = 1f
 )
 
 data class ModelOption(
@@ -31,7 +33,8 @@ data class BridgeConfig(
     val nativeComposerEnabled: Boolean,
     val showVoiceButton: Boolean,
     val isTablet: Boolean,
-    val enhancedWebComposer: Boolean = true
+    val enhancedWebComposer: Boolean = true,
+    val composerSpacerPx: Int = 0
 )
 
 data class AttachedFilePayload(
@@ -70,16 +73,22 @@ object ComposerBridgeProtocol {
             when (json.optString("type")) {
                 "ready" -> BridgeEvent.Ready
 
-                "composerState" -> BridgeEvent.ComposerStateChanged(
-                    ComposerState(
-                        hasComposer = json.optBoolean("hasComposer", false),
-                        currentModel = json.optString("currentModel", ""),
-                        currentPermissions = json.optString("currentPermissions", ""),
-                        isGenerating = json.optBoolean("isGenerating", false),
-                        hasVoiceButton = json.optBoolean("hasVoiceButton", false),
-                        hasAttach = json.optBoolean("hasAttach", false)
+                "composerState" -> {
+                    val leftFrac = json.optDouble("composerLeftFraction", 0.0).toFloat().coerceIn(0f, 0.9f)
+                    val rightFrac = json.optDouble("composerRightFraction", 1.0).toFloat().coerceIn(leftFrac + 0.1f, 1f)
+                    BridgeEvent.ComposerStateChanged(
+                        ComposerState(
+                            hasComposer = json.optBoolean("hasComposer", false),
+                            currentModel = json.optString("currentModel", ""),
+                            currentPermissions = json.optString("currentPermissions", ""),
+                            isGenerating = json.optBoolean("isGenerating", false),
+                            hasVoiceButton = json.optBoolean("hasVoiceButton", false),
+                            hasAttach = json.optBoolean("hasAttach", false),
+                            composerLeftFraction = leftFrac,
+                            composerRightFraction = rightFrac
+                        )
                     )
-                )
+                }
 
                 "modelsList" -> BridgeEvent.ModelsLoaded(parseModelArray(json.optJSONArray("models")))
 
@@ -182,6 +191,7 @@ object ComposerBridgeProtocol {
         put("showVoiceButton", config.showVoiceButton)
         put("isTablet", config.isTablet)
         put("enhancedWebComposer", config.enhancedWebComposer)
+        put("composerSpacerPx", config.composerSpacerPx)
     }.toString()
 
     fun encodeSend(text: String): String = JSONObject().apply {

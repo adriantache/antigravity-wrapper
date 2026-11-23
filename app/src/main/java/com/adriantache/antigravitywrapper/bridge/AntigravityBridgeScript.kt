@@ -28,7 +28,8 @@ object AntigravityBridgeScript {
     nativeComposerEnabled: true,
     showVoiceButton: false,
     isTablet: false,
-    enhancedWebComposer: true
+    enhancedWebComposer: true,
+    composerSpacerPx: 0
   };
   var lastStateJson = '';
   var lastCanScrollUp = null;
@@ -242,6 +243,8 @@ object AntigravityBridgeScript {
       );
     }
 
+    var spacerPx = Math.max(0, Math.round(Number(config.composerSpacerPx) || 0));
+
     // Offscreen-hide the web composer card while Native Composer is active
     // (kept mounted & non-display:none so Lexical paste + Base UI menus stay actionable)
     css.push(
@@ -257,15 +260,16 @@ object AntigravityBridgeScript {
       '  overflow: hidden !important;' +
       '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"] {' +
-      '  padding-bottom: 4px !important;' +
+      '  padding-bottom: ' + (spacerPx > 0 ? spacerPx : 4) + 'px !important;' +
       '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell {' +
-      '  height: 0 !important;' +
-      '  min-height: 0 !important;' +
+      '  height: ' + spacerPx + 'px !important;' +
+      '  min-height: ' + spacerPx + 'px !important;' +
       '  padding: 0 !important;' +
       '  margin: 0 !important;' +
       '  border: 0 !important;' +
       '  background: transparent !important;' +
+      '  pointer-events: none !important;' +
       '  overflow: visible !important;' +
       '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell .surface-composer,' +
@@ -406,6 +410,23 @@ object AntigravityBridgeScript {
     var voiceBtn = findVoiceButton();
     var fileInput = findFileInput();
 
+    var leftFrac = 0;
+    var rightFrac = 1;
+    var root = findComposerRoot();
+    if (hasComposer && root && window.innerWidth > 0) {
+      var hostEl = root;
+      var r = hostEl.getBoundingClientRect();
+      if (r.width < 10 && hostEl.parentElement) {
+        r = hostEl.parentElement.getBoundingClientRect();
+      }
+      if (r.width >= 10) {
+        var clampedLeft = Math.max(0, Math.min(window.innerWidth, r.left));
+        var clampedRight = Math.max(clampedLeft, Math.min(window.innerWidth, r.right));
+        leftFrac = Math.round((clampedLeft / window.innerWidth) * 1000) / 1000;
+        rightFrac = Math.round((clampedRight / window.innerWidth) * 1000) / 1000;
+      }
+    }
+
     return {
       type: 'composerState',
       hasComposer: hasComposer,
@@ -413,7 +434,9 @@ object AntigravityBridgeScript {
       currentPermissions: extractTriggerLabel(permTrigger, /^Agent permissions preset selector,?\s*/i),
       isGenerating: !!stopBtn,
       hasVoiceButton: !!voiceBtn,
-      hasAttach: !!fileInput
+      hasAttach: !!fileInput,
+      composerLeftFraction: leftFrac,
+      composerRightFraction: rightFrac
     };
   }
 
@@ -1165,6 +1188,7 @@ object AntigravityBridgeScript {
         if (typeof cmd.showVoiceButton === 'boolean') config.showVoiceButton = cmd.showVoiceButton;
         if (typeof cmd.isTablet === 'boolean') config.isTablet = cmd.isTablet;
         if (typeof cmd.enhancedWebComposer === 'boolean') config.enhancedWebComposer = cmd.enhancedWebComposer;
+        if (typeof cmd.composerSpacerPx === 'number') config.composerSpacerPx = cmd.composerSpacerPx;
         ensureStyles();
         reportComposerState(true);
         break;
@@ -1268,6 +1292,12 @@ object AntigravityBridgeScript {
     if (target) {
       var observer = new MutationObserver(scheduleStateReport);
       observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'aria-expanded', 'aria-disabled', 'class', 'style', 'hidden', 'aria-hidden'] });
+      if (typeof ResizeObserver === 'function') {
+        try {
+          var ro = new ResizeObserver(scheduleStateReport);
+          ro.observe(target);
+        } catch (e) {}
+      }
     }
 
     document.addEventListener('transitionend', scheduleStateReport, true);

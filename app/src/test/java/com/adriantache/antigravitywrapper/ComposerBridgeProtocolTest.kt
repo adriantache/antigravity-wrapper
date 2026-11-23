@@ -22,7 +22,9 @@ class ComposerBridgeProtocolTest {
               "currentPermissions": "Turbo",
               "isGenerating": true,
               "hasVoiceButton": true,
-              "hasAttach": true
+              "hasAttach": true,
+              "composerLeftFraction": 0.25,
+              "composerRightFraction": 0.92
             }
         """.trimIndent()
 
@@ -33,6 +35,8 @@ class ComposerBridgeProtocolTest {
         assertTrue(event.state.isGenerating)
         assertTrue(event.state.hasVoiceButton)
         assertTrue(event.state.hasAttach)
+        assertEquals(0.25f, event.state.composerLeftFraction, 0.001f)
+        assertEquals(0.92f, event.state.composerRightFraction, 0.001f)
     }
 
     @Test
@@ -171,7 +175,8 @@ class ComposerBridgeProtocolTest {
                     nativeComposerEnabled = true,
                     showVoiceButton = false,
                     isTablet = true,
-                    enhancedWebComposer = true
+                    enhancedWebComposer = true,
+                    composerSpacerPx = 112
                 )
             )
         )
@@ -180,6 +185,7 @@ class ComposerBridgeProtocolTest {
         assertFalse(cfgJson.getBoolean("showVoiceButton"))
         assertTrue(cfgJson.getBoolean("isTablet"))
         assertTrue(cfgJson.getBoolean("enhancedWebComposer"))
+        assertEquals(112, cfgJson.getInt("composerSpacerPx"))
 
         val sendJson = JSONObject(ComposerBridgeProtocol.encodeSend("Hello\nWorld"))
         assertEquals("send", sendJson.getString("type"))
