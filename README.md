@@ -24,19 +24,25 @@ Out of the box, Antigravity Wrapper connects to **`https://antigravity.google.co
 
 ### 2. Controls & Navigation
 
+- **Native Input Bar (Chat Sessions)**:
+  - Automatically activates on Antigravity chat pages for smooth, full-framerate native Android typing and free conversation scrolling while the keyboard is open (including on tablets).
+  - Includes a large **Send / Stop** button, **Attach** button, and native **Model** and **Permissions** picker sheets that work mid-draft without losing focus or clearing text.
+  - Tap the **Switch to Web Input** button on the composer bar (or in the floating `⋮` pill) anytime you want the web composer (for example, to use web-native `@` mention or `/` slash-command menus).
 - **Floating Control Pill (`⋮`)**:
   - **Drag** anywhere on the screen to reposition it.
-  - **Tap `⋮`** to expand quick actions (**Refresh** and **Settings**). It auto-collapses after 5 seconds.
+  - **Tap `⋮`** to expand quick actions (**Switch Native/Web Input** when on a chat page, **Refresh**, and **Settings**). It auto-collapses after 5 seconds.
 - **Back Gesture**:
-  - Navigates backward through WebView history when available.
-  - At the root page (with **Intercept Back Gestures** enabled), pressing Back sends an `Escape` key event to the web UI to dismiss popups/menus and requires a second press within 2 seconds to exit.
-- **Pull to Refresh**: Swipe down from the top of the page to reload.
+  - Dismisses open bottom sheets/dialogs or navigates backward through WebView history when available.
+  - At the root page (with **Intercept Back Gestures** enabled), pressing Back sends an `Escape` key event to both the main frame and Antigravity iframe to dismiss popups/menus and requires a second press within 2 seconds to exit.
+- **Pull to Refresh**: Swipe down from the top of the page to reload (automatically disabled while scrolling inner chat containers or while the keyboard is open).
 
 ### 3. Session Settings
 
 Open **Settings** from the floating control pill to configure:
 
 - **Remote Antigravity URL** & **Recent Sessions** (stores up to 10 recent URLs)
+- **Native Input Bar**: Use the native Compose composer bar with smooth typing, larger Send button, and native model/permissions pickers (enabled by default; applies immediately without reloading)
+- **Show Voice Button**: Display the voice memo button in both the native and web input bars (disabled by default to avoid accidental taps next to Send)
 - **Intercept Back Gestures**: Send `Escape` to the web session and require double-back to exit (enabled by default)
 - **Pull to Refresh**: Swipe down at the top of the page to reload (enabled by default)
 - **Keep Screen On**: Prevent display timeout while viewing a session (enabled by default)
@@ -45,16 +51,20 @@ Open **Settings** from the floating control pill to configure:
 
 ## Features
 
-- **Native Android Experience**: Edge-to-edge dark UI (`#101010` system bars), pull-to-refresh, and a top loading progress indicator.
+- **Native Input Bar & Model Pickers**: Replaces the web Lexical input card on chat pages with a native Jetpack Compose input bar bridged over AndroidX WebKit (`WebMessageListener` + `DocumentStartJavaScript`), preserving drafts on send failures and automatically falling back on login/non-chat screens.
+- **Enhanced Web Composer Fallback**: When switched to web input, injected CSS/JS enlarges the Send button (`40px`), hides or spaces out the voice button, keeps the model/permissions selectors tappable while typing, and unlocks tablet scrolling while the keyboard is open.
+- **Jank-Free Keyboard & Tablet Ergonomics**: Snaps the WebView once to the target IME height while animating only the lightweight native composer bar, eliminating per-frame Chromium reflow lag when opening or closing the keyboard.
+- **Native Android Experience**: Edge-to-edge dark UI (`#101010` system bars), SPA-aware pull-to-refresh, and a top loading progress indicator.
 - **Smart URL Routing**: Keeps Antigravity pages, Google authentication flows, and your configured server URL inside the WebView while opening external links in your default browser or app.
-- **Web-to-Native Notifications**: Bridges web `Notification` and `ServiceWorkerRegistration.showNotification` calls to native Android notifications with tap-to-open deep linking.
+- **Web-to-Native Notifications**: Bridges web `Notification` and `ServiceWorkerRegistration.showNotification` calls (including from the cross-origin Antigravity iframe) to native Android notifications with tap-to-open deep linking.
 - **Auto-Reconnect**: Monitors network connectivity and automatically reloads the session when internet access is restored.
-- **File Uploads**: Supports Android file picker integration for WebView file inputs.
+- **File Uploads**: Supports Android file picker integration for WebView file inputs and the native composer Attach button.
 
 ## Tech Stack & Requirements
 
 - **Language**: Kotlin (`2.4.21`)
 - **UI**: Jetpack Compose & Material 3
+- **Web Integration**: AndroidX WebKit (`1.13.0`)
 - **Android SDK**: `minSdk 35`, `targetSdk 37`, `compileSdk 37`
 - **Gradle**: Android Gradle Plugin `9.5.0`, Java 11
 
@@ -85,18 +95,23 @@ The debug APK will be generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
 ```text
 app/src/main/java/com/adriantache/antigravitywrapper/
-├── MainActivity.kt                  # App entry point, edge-to-edge setup, back handling, connectivity listener
+├── MainActivity.kt                  # App entry point, edge-to-edge/IME layout, back handling, connectivity listener
+├── bridge/
+│   ├── AntigravityBridgeScript.kt   # Document-start JS/CSS injected into Antigravity frames (including cross-origin iframe)
+│   ├── AntigravityWebBridge.kt      # AndroidX WebKit WebMessageListener bridge for composer, pickers, scroll & notifications
+│   └── ComposerModels.kt            # Bridge state models and JSON protocol encoder/parser
 ├── data/
 │   └── PreferencesManager.kt        # SharedPreferences wrapper for URL, history, and toggles
 ├── ui/
 │   ├── components/
-│   │   ├── AntigravityWebView.kt    # Configured WebView, JS notification polyfill, file chooser
+│   │   ├── AntigravityWebView.kt    # Configured WebView, bridge attachment, notification polyfill, file chooser
 │   │   ├── ConnectionErrorOverlay.kt# Offline / load error overlay with retry
-│   │   ├── FloatingControlPill.kt   # Draggable quick-action pill
+│   │   ├── FloatingControlPill.kt   # Draggable quick-action pill (composer toggle, refresh, settings)
+│   │   ├── NativeComposerBar.kt     # Native Jetpack Compose input bar & Model/Permissions bottom sheets
 │   │   ├── SettingsDialog.kt        # Session URL, recent history, and preference toggles
-│   │   └── WebNotificationBridge.kt # @JavascriptInterface for native notifications
+│   │   └── WebNotificationBridge.kt # @JavascriptInterface fallback for top-frame native notifications
 │   └── theme/                       # Material 3 theme, colors, and typography
 └── util/
     ├── NotificationHelper.kt        # Notification channel, intent extraction, URL normalization
-    └── UrlPolicy.kt                 # Internal vs. external URL navigation policy
+    └── UrlPolicy.kt                 # Internal vs. external URL routing & trusted bridge origin checks
 ```
