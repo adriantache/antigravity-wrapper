@@ -1071,6 +1071,19 @@ object AntigravityBridgeScript {
 
   function parseUsageText(rawText) {
     var lines = (rawText || '').split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+    // If the mobile drawer keeps the previous "Select Model" panel mounted before the "Usage" panel,
+    // start parsing right after the last standalone "Usage" heading.
+    var usageStartIdx = -1;
+    for (var u = lines.length - 1; u >= 0; u--) {
+      if (/^usage$/i.test(lines[u])) {
+        usageStartIdx = u;
+        break;
+      }
+    }
+    if (usageStartIdx !== -1) {
+      lines = lines.slice(usageStartIdx + 1);
+    }
+
     var sections = [];
     var currentSection = null;
     var currentItem = null;
@@ -1085,7 +1098,7 @@ object AntigravityBridgeScript {
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
-      if (/^(usage|back|close|view usage)$/i.test(line)) continue;
+      if (/^(usage|back|close|view usage|model)$/i.test(line)) continue;
 
       // Pure percentage line (e.g. "91% left", "100% left")
       var pctOnly = line.match(/^(\d{1,3})%\s*(left|remaining|used)?$/i);
@@ -1155,30 +1168,37 @@ object AntigravityBridgeScript {
         if (usageItem) {
           try { usageItem.click(); } catch (e) { triggerElementClick(usageItem); }
 
-          // Wait for Usage sub-view to render percentages/limits
-          var deadline = Date.now() + 1000;
+          // Wait for Usage sub-view to render percentages (e.g. "91% left")
+          var deadline = Date.now() + 2500;
           var usageText = '';
           while (Date.now() < deadline) {
-            await sleep(35);
+            await sleep(40);
             var portals = findNewBodyPortals(beforeSet);
             portals.forEach(function(p) { p.setAttribute('data-agy-scraped-portal', 'true'); });
             var candidates = portals.slice();
             if (found.container && document.contains(found.container)) {
               candidates.push(found.container);
             }
+            var extraOverlays = Array.prototype.slice.call(
+              document.querySelectorAll('[role="dialog"], [role="menu"], [aria-modal="true"], .agy-overlay')
+            );
+            extraOverlays.forEach(function(o) {
+              if (candidates.indexOf(o) === -1) candidates.push(o);
+            });
+
             for (var c = 0; c < candidates.length; c++) {
-              var txt = (candidates[c].innerText || '').trim();
-              if (/\d{1,3}%\s*(left|remaining|used)?/i.test(txt) && !/\bview usage\b/i.test(txt)) {
+              var txt = (candidates[c].innerText || candidates[c].textContent || '').trim();
+              if (/\d{1,3}%\s*(left|remaining|used)/i.test(txt)) {
                 usageText = txt;
                 break;
               }
             }
             if (usageText) {
-              await sleep(40);
-              // Re-read once settled in case second section finished rendering
+              await sleep(60);
+              // Re-read once settled in case all quota sections finished rendering
               for (var r = 0; r < candidates.length; r++) {
-                var settled = (candidates[r].innerText || '').trim();
-                if (settled.length >= usageText.length && /\d{1,3}%/.test(settled)) {
+                var settled = (candidates[r].innerText || candidates[r].textContent || '').trim();
+                if (settled.length >= usageText.length && /\d{1,3}%\s*(left|remaining|used)/i.test(settled)) {
                   usageText = settled;
                 }
               }

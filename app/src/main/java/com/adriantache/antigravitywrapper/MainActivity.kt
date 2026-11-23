@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.util.Base64
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebView
@@ -430,9 +431,27 @@ fun AntigravityApp(
 
     LaunchedEffect(isLoadingUsage) {
         if (isLoadingUsage) {
-            delay(3000L)
+            delay(4500L)
             if (isLoadingUsage) {
                 isLoadingUsage = false
+            }
+        }
+    }
+
+    // Prevent WebView's hidden Base UI menu/dialog focus-trap from stealing Android View focus
+    // (and dismissing the soft keyboard) while silently scraping Usage data.
+    DisposableEffect(isLoadingUsage, webViewInstance) {
+        val wv = webViewInstance
+        if (isLoadingUsage && wv != null) {
+            wv.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            wv.isFocusable = false
+            wv.isFocusableInTouchMode = false
+        }
+        onDispose {
+            if (wv != null) {
+                wv.isFocusable = true
+                wv.isFocusableInTouchMode = true
+                wv.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             }
         }
     }
