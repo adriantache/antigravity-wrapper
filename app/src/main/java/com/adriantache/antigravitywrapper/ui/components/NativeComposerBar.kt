@@ -51,6 +51,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -118,7 +120,8 @@ fun NativeComposerBar(
     isSending: Boolean,
     showVoiceButton: Boolean,
     isFloatingOverlay: Boolean = false,
-    onSend: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    onSend: (fromHardwareKeyboard: Boolean) -> Unit,
     onStop: () -> Unit,
     onOpenModelPicker: () -> Unit,
     onOpenPermissionsPicker: () -> Unit,
@@ -321,6 +324,13 @@ fun NativeComposerBar(
                                 onValueChange = onTextChange,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .then(
+                                        if (focusRequester != null) {
+                                            Modifier.focusRequester(focusRequester)
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                                     .onPreviewKeyEvent { keyEvent ->
                                         val isEnter = keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter
                                         val action = resolveExternalKeyboardEnterAction(
@@ -333,7 +343,7 @@ fun NativeComposerBar(
                                         )
                                         when (action) {
                                             EnterKeyAction.SEND -> {
-                                                onSend()
+                                                onSend(true)
                                                 true
                                             }
                                             EnterKeyAction.CONSUME_ONLY -> true
@@ -391,7 +401,7 @@ fun NativeComposerBar(
                                 .clip(CircleShape)
                                 .background(buttonColor)
                                 .clickable(enabled = showStop || canSend) {
-                                    if (showStop) onStop() else onSend()
+                                    if (showStop) onStop() else onSend(false)
                                 },
                             contentAlignment = Alignment.Center
                         ) {

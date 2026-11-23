@@ -28,7 +28,8 @@ class AntigravityWebBridge(
     private val onPermissionsLoaded: (List<PermissionOption>) -> Unit,
     private val onScrollStateChanged: (Boolean) -> Unit,
     private val onSendResult: (ok: Boolean, error: String?) -> Unit,
-    private val onAttachResult: (ok: Boolean, fileNames: List<String>, error: String?) -> Unit = { _, _, _ -> }
+    private val onAttachResult: (ok: Boolean, fileNames: List<String>, error: String?) -> Unit = { _, _, _ -> },
+    private val onRequestNativeFocus: () -> Unit = {}
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val frameProxies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
@@ -127,6 +128,10 @@ class AntigravityWebBridge(
 
             is BridgeEvent.AttachResult -> {
                 postToMain { onAttachResult(event.ok, event.fileNames, event.error) }
+            }
+
+            BridgeEvent.RequestNativeFocus -> {
+                postToMain { onRequestNativeFocus() }
             }
 
             is BridgeEvent.WebNotification -> {

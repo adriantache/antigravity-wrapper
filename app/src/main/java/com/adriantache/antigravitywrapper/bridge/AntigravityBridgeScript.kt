@@ -262,6 +262,16 @@ object AntigravityBridgeScript {
       'body.agy-native-composer-active [data-testid="agent-input-box"] {' +
       '  padding-bottom: ' + (spacerPx > 0 ? spacerPx : 4) + 'px !important;' +
       '}' +
+      'body.agy-native-composer-active .agy-empty-composer-parent {' +
+      '  padding-top: 0 !important;' +
+      '  padding-bottom: 0 !important;' +
+      '  margin-top: 0 !important;' +
+      '  margin-bottom: 0 !important;' +
+      '  border-top: 0 !important;' +
+      '  border-bottom: 0 !important;' +
+      '  min-height: 0 !important;' +
+      '  background: transparent !important;' +
+      '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell {' +
       '  height: ' + spacerPx + 'px !important;' +
       '  min-height: ' + spacerPx + 'px !important;' +
@@ -402,10 +412,31 @@ object AntigravityBridgeScript {
         }
       }
 
-      if (isNativeActive && !rootHasExtra && !shellHasExtra) {
+      var isEmptyShell = isNativeActive && !rootHasExtra && !shellHasExtra;
+      if (isEmptyShell) {
         root.classList.add('agy-empty-composer-shell');
       } else {
         root.classList.remove('agy-empty-composer-shell');
+      }
+
+      // Collapse single-child sticky footer wrappers (e.g. border-t / padding around quick composer)
+      var p = root.parentElement;
+      for (var depth = 0; depth < 2 && p && p !== document.body && p !== document.documentElement; depth++) {
+        var visibleChildren = Array.prototype.slice.call(p.children).filter(function(c) {
+          var cs = window.getComputedStyle(c);
+          return cs.display !== 'none' && cs.visibility !== 'hidden';
+        });
+        if (visibleChildren.length === 1 && isEmptyShell) {
+          p.classList.add('agy-empty-composer-parent');
+        } else {
+          p.classList.remove('agy-empty-composer-parent');
+          break;
+        }
+        p = p.parentElement;
+      }
+
+      if (isNativeActive && document.activeElement) {
+        handOffHiddenLexicalFocus(document.activeElement);
       }
     }
     if (config.isTablet) {
@@ -415,7 +446,24 @@ object AntigravityBridgeScript {
     }
   }
 
-  // 4. Prevent web Lexical blur from blocking model/permissions taps in web composer mode
+  // 4. Focus guards:
+  //    a) Prevent web Lexical blur from blocking model/permissions taps in web composer mode
+  //    b) Hand off auto-focus on the hidden Lexical editor (e.g. on "+ New Conversation") to native TextField
+  var lastNativeFocusRequestAt = 0;
+  function handOffHiddenLexicalFocus(target) {
+    if (!config.nativeComposerEnabled || isSending) return;
+    if (!target || typeof target.closest !== 'function') return;
+    var editor = target.closest('[data-lexical-editor="true"]');
+    if (!editor) return;
+    if (!isComposerActuallyVisible()) return;
+    try { editor.blur(); } catch (e) {}
+    var now = Date.now();
+    if (now - lastNativeFocusRequestAt > 150) {
+      lastNativeFocusRequestAt = now;
+      postToNative({ type: 'requestNativeFocus' });
+    }
+  }
+
   function installFocusGuard() {
     document.addEventListener('mousedown', function(e) {
       var target = e.target;
@@ -427,6 +475,10 @@ object AntigravityBridgeScript {
         // Keep focus steady during press so layout does not jump before click fires
         e.preventDefault();
       }
+    }, true);
+
+    document.addEventListener('focusin', function(e) {
+      handOffHiddenLexicalFocus(e.target);
     }, true);
   }
 

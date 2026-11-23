@@ -61,6 +61,7 @@ sealed class BridgeEvent {
         val fileNames: List<String> = emptyList(),
         val error: String? = null
     ) : BridgeEvent()
+    data object RequestNativeFocus : BridgeEvent()
     data class WebNotification(val title: String, val body: String, val url: String) : BridgeEvent()
 }
 
@@ -145,6 +146,8 @@ object ComposerBridgeProtocol {
                         error = json.optString("error", "").ifBlank { null }
                     )
                 }
+
+                "requestNativeFocus" -> BridgeEvent.RequestNativeFocus
 
                 "notification" -> BridgeEvent.WebNotification(
                     title = json.optString("title", "Antigravity"),

@@ -159,6 +159,11 @@ class ComposerBridgeProtocolTest {
         val selectDone = ComposerBridgeProtocol.parseEvent("""{"type":"modelSelectResult","done":true}""")
             as BridgeEvent.ModelSelectResult
         assertTrue(selectDone.done)
+
+        assertEquals(
+            BridgeEvent.RequestNativeFocus,
+            ComposerBridgeProtocol.parseEvent("""{"type":"requestNativeFocus"}""")
+        )
     }
 
     @Test

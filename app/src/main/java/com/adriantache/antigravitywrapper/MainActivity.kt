@@ -2,6 +2,7 @@ package com.adriantache.antigravitywrapper
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -64,11 +65,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -184,7 +188,11 @@ fun AntigravityApp(
     val context = LocalContext.current
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val isTablet = configuration.screenWidthDp >= 600
+    val hasHardwareKeyboard = configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+    val latestHasHardwareKeyboard by rememberUpdatedState(hasHardwareKeyboard)
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -218,6 +226,9 @@ fun AntigravityApp(
     var attachedFileNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var isAttachingFiles by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
+    var lastSendWasHardwareKeyboard by remember { mutableStateOf(false) }
+    var pendingNativeFocus by remember { mutableStateOf(false) }
+    val composerFocusRequester = remember { FocusRequester() }
     var composerHeightPx by remember { mutableIntStateOf(0) }
     var containerWidthPx by remember { mutableIntStateOf(0) }
 
@@ -273,7 +284,14 @@ fun AntigravityApp(
                 if (ok) {
                     draftText = ""
                     attachedFileNames = emptyList()
+                    // Dismiss on-screen soft keyboard after sending, but keep focus for hardware keyboards
+                    if (!lastSendWasHardwareKeyboard && !latestHasHardwareKeyboard) {
+                        focusManager.clearFocus()
+                        keyboardController?.hide()
+                    }
+                    lastSendWasHardwareKeyboard = false
                 } else {
+                    lastSendWasHardwareKeyboard = false
                     coroutineScope.launch {
                         snackbarHostState.currentSnackbarData?.dismiss()
                         snackbarHostState.showSnackbar(
@@ -297,6 +315,9 @@ fun AntigravityApp(
                         )
                     }
                 }
+            },
+            onRequestNativeFocus = {
+                pendingNativeFocus = true
             }
         )
     }
@@ -353,6 +374,20 @@ fun AntigravityApp(
                 composerSpacerPx = composerSpacerPx
             )
         )
+    }
+
+    // Hand off focus to native TextField when web UI auto-focuses its hidden editor (e.g. "+ New Conversation")
+    LaunchedEffect(pendingNativeFocus, showNativeComposer) {
+        if (pendingNativeFocus && showNativeComposer) {
+            delay(50L)
+            try {
+                composerFocusRequester.requestFocus()
+                keyboardController?.show()
+            } catch (_: Exception) {
+                // FocusRequester not yet attached
+            }
+            pendingNativeFocus = false
+        }
     }
 
     // Guard against stuck sending spinner if iframe navigates mid-send
@@ -630,13 +665,16 @@ fun AntigravityApp(
                     isSending = isSendingMessage,
                     showVoiceButton = isShowVoiceButtonEnabled,
                     isFloatingOverlay = isSplitLayout,
-                    onSend = {
+                    focusRequester = composerFocusRequester,
+                    onSend = { fromHardwareKeyboard ->
                         val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
                         if (hasContent && !isSendingMessage) {
+                            lastSendWasHardwareKeyboard = fromHardwareKeyboard
                             isSendingMessage = true
                             val posted = webBridge.sendMessage(draftText)
                             if (!posted) {
                                 isSendingMessage = false
+                                lastSendWasHardwareKeyboard = false
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar("Session not ready yet")
                                 }
