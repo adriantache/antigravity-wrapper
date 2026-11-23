@@ -100,6 +100,13 @@ class ComposerBridgeProtocolTest {
         assertEquals("Done", notif.title)
         assertEquals("Task finished", notif.body)
         assertEquals("https://antigravity.google.com/r/123", notif.url)
+
+        val attachOk = ComposerBridgeProtocol.parseEvent(
+            """{"type":"attachResult","ok":true,"names":["photo.jpg","notes.txt"],"error":""}"""
+        ) as BridgeEvent.AttachResult
+        assertTrue(attachOk.ok)
+        assertEquals(listOf("photo.jpg", "notes.txt"), attachOk.fileNames)
+        assertNull(attachOk.error)
     }
 
     @Test
@@ -138,5 +145,23 @@ class ComposerBridgeProtocolTest {
         assertEquals("selectModel", modelJson.getString("type"))
         assertEquals("Gemini 4 Neon High New", modelJson.getString("fullText"))
         assertEquals("Gemini 4 Neon", modelJson.getString("name"))
+
+        val batchStart = JSONObject(ComposerBridgeProtocol.encodeAttachBatchStart("b_1", 2))
+        assertEquals("attachBatchStart", batchStart.getString("type"))
+        assertEquals("b_1", batchStart.getString("batchId"))
+        assertEquals(2, batchStart.getInt("fileCount"))
+
+        val fileStart = JSONObject(ComposerBridgeProtocol.encodeAttachFileStart("b_1", 0, "img.png", "image/png"))
+        assertEquals("attachFileStart", fileStart.getString("type"))
+        assertEquals("img.png", fileStart.getString("name"))
+        assertEquals("image/png", fileStart.getString("mimeType"))
+
+        val fileChunk = JSONObject(ComposerBridgeProtocol.encodeAttachFileChunk("b_1", 0, "YWJj"))
+        assertEquals("attachFileChunk", fileChunk.getString("type"))
+        assertEquals("YWJj", fileChunk.getString("data"))
+
+        val batchCommit = JSONObject(ComposerBridgeProtocol.encodeAttachBatchCommit("b_1"))
+        assertEquals("attachBatchCommit", batchCommit.getString("type"))
+        assertEquals("b_1", batchCommit.getString("batchId"))
     }
 }

@@ -6,16 +6,21 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.util.Base64
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -66,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
+import com.adriantache.antigravitywrapper.bridge.AttachedFilePayload
 import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.ComposerState
 import com.adriantache.antigravitywrapper.bridge.ModelOption
@@ -81,8 +87,10 @@ import com.adriantache.antigravitywrapper.ui.components.SettingsDialog
 import com.adriantache.antigravitywrapper.ui.components.dispatchEscapeEvent
 import com.adriantache.antigravitywrapper.ui.theme.AntigravityWrapperTheme
 import com.adriantache.antigravitywrapper.util.NotificationHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -204,6 +212,8 @@ fun AntigravityApp(
     // Native composer & bridge state
     var composerState by remember { mutableStateOf(ComposerState()) }
     var draftText by rememberSaveable { mutableStateOf("") }
+    var attachedFileNames by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isAttachingFiles by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
     var composerHeightPx by remember { mutableIntStateOf(0) }
 
@@ -239,6 +249,7 @@ fun AntigravityApp(
                 isSendingMessage = false
                 if (ok) {
                     draftText = ""
+                    attachedFileNames = emptyList()
                 } else {
                     coroutineScope.launch {
                         snackbarHostState.currentSnackbarData?.dismiss()
@@ -249,8 +260,50 @@ fun AntigravityApp(
                         )
                     }
                 }
+            },
+            onAttachResult = { ok, names, error ->
+                isAttachingFiles = false
+                if (ok && names.isNotEmpty()) {
+                    attachedFileNames = attachedFileNames + names
+                } else if (!ok) {
+                    coroutineScope.launch {
+                        snackbarHostState.currentSnackbarData?.dismiss()
+                        snackbarHostState.showSnackbar(
+                            message = error?.ifBlank { null } ?: "Couldn't attach file",
+                            duration = SnackbarDuration.Short
+                        )
+                    }
+                }
             }
         )
+    }
+
+    // Native file picker launcher (avoids WebView's transient user-activation block on hidden file inputs)
+    val nativeFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        isAttachingFiles = true
+        coroutineScope.launch {
+            val (payloads, skippedLarge) = withContext(Dispatchers.IO) {
+                readSelectedFiles(context, uris)
+            }
+            if (skippedLarge > 0) {
+                snackbarHostState.showSnackbar(
+                    message = "Skipped $skippedLarge file(s) over 25 MB limit",
+                    duration = SnackbarDuration.Short
+                )
+            }
+            if (payloads.isEmpty()) {
+                isAttachingFiles = false
+                return@launch
+            }
+            val posted = webBridge.attachFiles(payloads)
+            if (!posted) {
+                isAttachingFiles = false
+                snackbarHostState.showSnackbar("Session not ready to attach files")
+            }
+        }
     }
 
     // Push live config updates into the iframe whenever toggles or screen width change
@@ -273,6 +326,20 @@ fun AntigravityApp(
                 isSendingMessage = false
                 snackbarHostState.showSnackbar(
                     message = "Send timed out — your draft was kept",
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
+    }
+
+    // Guard against stuck attaching spinner
+    LaunchedEffect(isAttachingFiles) {
+        if (isAttachingFiles) {
+            delay(10_000L)
+            if (isAttachingFiles) {
+                isAttachingFiles = false
+                snackbarHostState.showSnackbar(
+                    message = "File attachment timed out",
                     duration = SnackbarDuration.Short
                 )
             }
@@ -442,6 +509,8 @@ fun AntigravityApp(
                     onPageStarted = {
                         isPageLoading = true
                         hasConnectionError = false
+                        attachedFileNames = emptyList()
+                        isAttachingFiles = false
                     },
                     onPageFinished = {
                         isPageLoading = false
@@ -487,11 +556,13 @@ fun AntigravityApp(
                     text = draftText,
                     onTextChange = { draftText = it },
                     composerState = composerState,
+                    attachedFileNames = attachedFileNames,
+                    isAttaching = isAttachingFiles,
                     isSending = isSendingMessage,
                     showVoiceButton = isShowVoiceButtonEnabled,
                     onSend = {
-                        val trimmed = draftText.trim()
-                        if (trimmed.isNotEmpty() && !isSendingMessage) {
+                        val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
+                        if (hasContent && !isSendingMessage) {
                             isSendingMessage = true
                             val posted = webBridge.sendMessage(draftText)
                             if (!posted) {
@@ -520,7 +591,15 @@ fun AntigravityApp(
                         }
                     },
                     onAttachClick = {
-                        webBridge.triggerAttach()
+                        try {
+                            nativeFilePickerLauncher.launch(arrayOf("*/*"))
+                        } catch (_: Exception) {
+                            webBridge.triggerAttach()
+                        }
+                    },
+                    onClearAttachments = {
+                        attachedFileNames = emptyList()
+                        webBridge.clearAttachments()
                     },
                     onVoiceClick = {
                         webBridge.triggerVoice()
@@ -658,4 +737,71 @@ fun AntigravityApp(
             }
         }
     }
+}
+
+private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+private fun readSelectedFiles(
+    context: Context,
+    uris: List<Uri>
+): Pair<List<AttachedFilePayload>, Int> {
+    val resolver = context.contentResolver
+    val payloads = mutableListOf<AttachedFilePayload>()
+    var skippedLarge = 0
+
+    for (uri in uris) {
+        try {
+            var displayName = "attachment"
+            var reportedSize = -1L
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIdx >= 0) {
+                            cursor.getString(nameIdx)?.takeIf { it.isNotBlank() }?.let { displayName = it }
+                        }
+                        val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) {
+                            reportedSize = cursor.getLong(sizeIdx)
+                        }
+                    }
+                }
+
+            if (reportedSize > MAX_ATTACHMENT_BYTES) {
+                skippedLarge++
+                continue
+            }
+
+            val bytes = resolver.openInputStream(uri)?.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(16 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(buf)
+                    if (read <= 0) break
+                    total += read
+                    if (total > MAX_ATTACHMENT_BYTES) {
+                        skippedLarge++
+                        return@use null
+                    }
+                    out.write(buf, 0, read)
+                }
+                out.toByteArray()
+            } ?: continue
+
+            val mimeType = resolver.getType(uri) ?: "application/octet-stream"
+            val encoded = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            payloads.add(
+                AttachedFilePayload(
+                    name = displayName,
+                    mimeType = mimeType,
+                    base64Data = encoded
+                )
+            )
+        } catch (_: Exception) {
+            // Skip unreadable URI
+        }
+    }
+
+    return payloads to skippedLarge
 }

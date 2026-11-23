@@ -34,6 +34,12 @@ data class BridgeConfig(
     val enhancedWebComposer: Boolean = true
 )
 
+data class AttachedFilePayload(
+    val name: String,
+    val mimeType: String,
+    val base64Data: String
+)
+
 sealed class BridgeEvent {
     data object Ready : BridgeEvent()
     data class ComposerStateChanged(val state: ComposerState) : BridgeEvent()
@@ -41,6 +47,11 @@ sealed class BridgeEvent {
     data class PermissionsLoaded(val options: List<PermissionOption>) : BridgeEvent()
     data class ScrollStateChanged(val canScrollUp: Boolean) : BridgeEvent()
     data class SendResult(val ok: Boolean, val error: String? = null) : BridgeEvent()
+    data class AttachResult(
+        val ok: Boolean,
+        val fileNames: List<String> = emptyList(),
+        val error: String? = null
+    ) : BridgeEvent()
     data class WebNotification(val title: String, val body: String, val url: String) : BridgeEvent()
 }
 
@@ -117,6 +128,21 @@ object ComposerBridgeProtocol {
                     error = json.optString("error", "").ifBlank { null }
                 )
 
+                "attachResult" -> {
+                    val arr = json.optJSONArray("names") ?: JSONArray()
+                    val names = buildList {
+                        for (i in 0 until arr.length()) {
+                            val name = arr.optString(i, "").trim()
+                            if (name.isNotEmpty()) add(name)
+                        }
+                    }
+                    BridgeEvent.AttachResult(
+                        ok = json.optBoolean("ok", false),
+                        fileNames = names,
+                        error = json.optString("error", "").ifBlank { null }
+                    )
+                }
+
                 "notification" -> BridgeEvent.WebNotification(
                     title = json.optString("title", "Antigravity"),
                     body = json.optString("body", ""),
@@ -156,5 +182,40 @@ object ComposerBridgeProtocol {
 
     fun encodeSimpleCommand(type: String): String = JSONObject().apply {
         put("type", type)
+    }.toString()
+
+    fun encodeAttachBatchStart(batchId: String, fileCount: Int): String = JSONObject().apply {
+        put("type", "attachBatchStart")
+        put("batchId", batchId)
+        put("fileCount", fileCount)
+    }.toString()
+
+    fun encodeAttachFileStart(
+        batchId: String,
+        index: Int,
+        name: String,
+        mimeType: String
+    ): String = JSONObject().apply {
+        put("type", "attachFileStart")
+        put("batchId", batchId)
+        put("index", index)
+        put("name", name)
+        put("mimeType", mimeType)
+    }.toString()
+
+    fun encodeAttachFileChunk(
+        batchId: String,
+        index: Int,
+        data: String
+    ): String = JSONObject().apply {
+        put("type", "attachFileChunk")
+        put("batchId", batchId)
+        put("index", index)
+        put("data", data)
+    }.toString()
+
+    fun encodeAttachBatchCommit(batchId: String): String = JSONObject().apply {
+        put("type", "attachBatchCommit")
+        put("batchId", batchId)
     }.toString()
 }

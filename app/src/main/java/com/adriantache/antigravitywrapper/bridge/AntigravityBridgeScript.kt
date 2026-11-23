@@ -34,6 +34,7 @@ object AntigravityBridgeScript {
   var lastCanScrollUp = null;
   var stateTimer = null;
   var isSending = false;
+  var pendingAttachBatches = {};
 
   function postToNative(payload) {
     try {
@@ -257,16 +258,41 @@ object AntigravityBridgeScript {
       '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"] {' +
       '  padding-bottom: 4px !important;' +
+      '}' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell {' +
+      '  height: 0 !important;' +
+      '  min-height: 0 !important;' +
+      '  padding: 0 !important;' +
+      '  margin: 0 !important;' +
+      '  border: 0 !important;' +
+      '  background: transparent !important;' +
+      '  overflow: visible !important;' +
+      '}' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell .surface-composer,' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell [id="antigravity.agentSidePanelInputBox"] {' +
+      '  height: 0 !important;' +
+      '  min-height: 0 !important;' +
+      '  padding: 0 !important;' +
+      '  margin: 0 !important;' +
+      '  border: 0 !important;' +
+      '  background: transparent !important;' +
+      '  box-shadow: none !important;' +
+      '  overflow: visible !important;' +
       '}'
     );
 
-    // Hide menu popover invisibly during programmatic option scraping
+    // Hide menu/dialog/drawer popover invisibly during programmatic option scraping
     css.push(
-      'body.agy-scraping-menu [role="menu"].agy-overlay,' +
-      'body.agy-scraping-menu [role="menu"] {' +
+      'body.agy-scraping-menu [role="menu"],' +
+      'body.agy-scraping-menu [role="listbox"],' +
+      'body.agy-scraping-menu [role="dialog"],' +
+      'body.agy-scraping-menu [aria-modal="true"],' +
+      'body.agy-scraping-menu .agy-overlay,' +
+      'body.agy-scraping-menu [data-agy-scraped-portal="true"] {' +
       '  opacity: 0 !important;' +
       '  pointer-events: none !important;' +
       '  transition: none !important;' +
+      '  animation: none !important;' +
       '}'
     );
 
@@ -288,11 +314,23 @@ object AntigravityBridgeScript {
   function syncBodyClasses() {
     var body = document.body;
     if (!body) return;
-    var hasComposer = !!findEditor() && !!findComposerRoot();
-    if (config.nativeComposerEnabled && hasComposer) {
+    var root = findComposerRoot();
+    var hasComposer = !!findEditor() && !!root;
+    var isNativeActive = config.nativeComposerEnabled && hasComposer;
+    if (isNativeActive) {
       body.classList.add('agy-native-composer-active');
     } else {
       body.classList.remove('agy-native-composer-active');
+    }
+    if (root) {
+      var hasHeaderTrigger = !!root.querySelector(
+        '[data-testid="project-selector-trigger"], [data-testid="branch-pill-trigger"], [data-testid="location-selector-trigger"]'
+      );
+      if (isNativeActive && !hasHeaderTrigger) {
+        root.classList.add('agy-empty-composer-shell');
+      } else {
+        root.classList.remove('agy-empty-composer-shell');
+      }
     }
     if (config.isTablet) {
       body.classList.add('agy-tablet-scroll');
@@ -412,64 +450,67 @@ object AntigravityBridgeScript {
 
     isSending = true;
     try {
-      editor.focus({ preventScroll: true });
+      var hasText = (text || '').trim().length > 0;
+      if (hasText) {
+        editor.focus({ preventScroll: true });
 
-      // Clear any previous draft in the hidden editor
-      var sel = window.getSelection();
-      if (sel) {
-        var range = document.createRange();
-        range.selectNodeContents(editor);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-      if ((editor.innerText || '').trim().length > 0) {
-        try { document.execCommand('delete', false); } catch (e) {}
-        await sleep(16);
-      }
+        // Clear any previous draft in the hidden editor
+        var sel = window.getSelection();
+        if (sel) {
+          var range = document.createRange();
+          range.selectNodeContents(editor);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+        if ((editor.innerText || '').trim().length > 0) {
+          try { document.execCommand('delete', false); } catch (e) {}
+          await sleep(16);
+        }
 
-      var inserted = false;
+        var inserted = false;
 
-      // Strategy A: Synthetic paste (Lexical's PASTE_COMMAND handles multiline text cleanly)
-      try {
-        var dt = new DataTransfer();
-        dt.setData('text/plain', text);
-        var pasteEvent = new ClipboardEvent('paste', {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: dt
-        });
-        editor.dispatchEvent(pasteEvent);
-        await sleep(35);
-        inserted = (editor.innerText || '').trim().length > 0;
-      } catch (e) {}
-
-      // Strategy B: execCommand('insertText')
-      if (!inserted) {
+        // Strategy A: Synthetic paste (Lexical's PASTE_COMMAND handles multiline text cleanly)
         try {
-          editor.focus({ preventScroll: true });
-          document.execCommand('insertText', false, text);
-          await sleep(35);
-          inserted = (editor.innerText || '').trim().length > 0;
-        } catch (e) {}
-      }
-
-      // Strategy C: beforeinput InputEvent
-      if (!inserted) {
-        try {
-          editor.dispatchEvent(new InputEvent('beforeinput', {
+          var dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          var pasteEvent = new ClipboardEvent('paste', {
             bubbles: true,
             cancelable: true,
-            inputType: 'insertText',
-            data: text
-          }));
+            clipboardData: dt
+          });
+          editor.dispatchEvent(pasteEvent);
           await sleep(35);
           inserted = (editor.innerText || '').trim().length > 0;
         } catch (e) {}
-      }
 
-      if (!inserted) {
-        try { editor.blur(); } catch (e) {}
-        return { ok: false, error: 'Could not insert text into web composer' };
+        // Strategy B: execCommand('insertText')
+        if (!inserted) {
+          try {
+            editor.focus({ preventScroll: true });
+            document.execCommand('insertText', false, text);
+            await sleep(35);
+            inserted = (editor.innerText || '').trim().length > 0;
+          } catch (e) {}
+        }
+
+        // Strategy C: beforeinput InputEvent
+        if (!inserted) {
+          try {
+            editor.dispatchEvent(new InputEvent('beforeinput', {
+              bubbles: true,
+              cancelable: true,
+              inputType: 'insertText',
+              data: text
+            }));
+            await sleep(35);
+            inserted = (editor.innerText || '').trim().length > 0;
+          } catch (e) {}
+        }
+
+        if (!inserted) {
+          try { editor.blur(); } catch (e) {}
+          return { ok: false, error: 'Could not insert text into web composer' };
+        }
       }
 
       // Wait for Send button to become enabled, then click
@@ -486,7 +527,7 @@ object AntigravityBridgeScript {
       }
 
       // Fallback: Enter key on Lexical editor
-      if (!sent) {
+      if (!sent && hasText) {
         editor.dispatchEvent(new KeyboardEvent('keydown', {
           key: 'Enter',
           code: 'Enter',
@@ -507,42 +548,260 @@ object AntigravityBridgeScript {
     }
   }
 
-  // 8. Menu scraping & selection for Model and Permissions pickers
-  async function waitForMenuItems(timeoutMs) {
+  // 7b. Reconstruct files from chunked base64 transfer and attach directly to React's file input
+  function base64ToUint8Array(b64) {
+    var binary = atob(b64);
+    var len = binary.length;
+    var bytes = new Uint8Array(len);
+    for (var i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  async function commitAttachedFiles(batchId) {
+    var batch = pendingAttachBatches[batchId];
+    delete pendingAttachBatches[batchId];
+    if (!batch || !batch.files || !batch.files.length) {
+      postToNative({ type: 'attachResult', ok: false, names: [], error: 'No files received' });
+      return;
+    }
+
+    try {
+      var dt = new DataTransfer();
+      var names = [];
+      for (var i = 0; i < batch.files.length; i++) {
+        var entry = batch.files[i];
+        if (!entry) continue;
+        var b64 = entry.chunks.join('');
+        var bytes = base64ToUint8Array(b64);
+        var file = new File([bytes], entry.name || ('file_' + i), {
+          type: entry.mimeType || 'application/octet-stream',
+          lastModified: Date.now()
+        });
+        dt.items.add(file);
+        names.push(file.name);
+      }
+
+      if (!dt.files.length) {
+        postToNative({ type: 'attachResult', ok: false, names: [], error: 'Failed to decode files' });
+        return;
+      }
+
+      var fileInput = findFileInput() || document.querySelector('input[type="file"]');
+      var attached = false;
+
+      if (fileInput) {
+        try {
+          var filesDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'files');
+          if (filesDesc && typeof filesDesc.set === 'function') {
+            filesDesc.set.call(fileInput, dt.files);
+          } else {
+            fileInput.files = dt.files;
+          }
+          fileInput.dispatchEvent(new Event('input', { bubbles: true }));
+          fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+          attached = true;
+        } catch (e) {}
+      }
+
+      // Fallback: dispatch paste/drop with files onto Lexical editor if no file input found
+      if (!attached) {
+        var editor = findEditor();
+        if (editor) {
+          editor.focus({ preventScroll: true });
+          editor.dispatchEvent(new ClipboardEvent('paste', {
+            bubbles: true,
+            cancelable: true,
+            clipboardData: dt
+          }));
+          try { editor.blur(); } catch (e) {}
+          attached = true;
+        }
+      }
+
+      await sleep(80);
+      reportComposerState(true);
+      postToNative({
+        type: 'attachResult',
+        ok: attached,
+        names: attached ? names : [],
+        error: attached ? '' : 'File input not found on page'
+      });
+    } catch (e) {
+      postToNative({
+        type: 'attachResult',
+        ok: false,
+        names: [],
+        error: (e && e.message) ? String(e.message) : 'Failed to attach files'
+      });
+    }
+  }
+
+  function clearWebAttachments() {
+    var card = findComposerCard();
+    if (card) {
+      var removeBtns = card.querySelectorAll(
+        'button[aria-label*="Remove" i], button[aria-label*="Delete" i], button[aria-label*="Dismiss" i], button[aria-label*="Clear" i]'
+      );
+      removeBtns.forEach(function(btn) {
+        triggerElementClick(btn);
+      });
+    }
+    var fileInput = findFileInput();
+    if (fileInput) {
+      try { fileInput.value = ''; } catch (e) {}
+    }
+    setTimeout(function() { reportComposerState(true); }, 100);
+  }
+
+  // 8. Menu / mobile drawer scraping & selection for Model and Permissions pickers
+  function snapshotBodyChildren() {
+    var set = new Set();
+    if (document.body) {
+      Array.prototype.slice.call(document.body.children).forEach(function(c) { set.add(c); });
+    }
+    return set;
+  }
+
+  function findNewBodyPortals(beforeSet) {
+    if (!document.body || !beforeSet) return [];
+    return Array.prototype.slice.call(document.body.children).filter(function(c) {
+      if (beforeSet.has(c)) return false;
+      var tag = (c.tagName || '').toLowerCase();
+      return tag !== 'script' && tag !== 'style';
+    });
+  }
+
+  function extractOverlayItems(container) {
+    if (!container) return [];
+    var roleItems = Array.prototype.slice.call(
+      container.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"]')
+    );
+    if (roleItems.length > 0) return roleItems;
+
+    // Mobile sheets/dialogs may render choices as plain <button> or clickable rows
+    var buttons = Array.prototype.slice.call(container.querySelectorAll('button, [tabindex="0"]'))
+      .filter(function(el) {
+        var txt = (el.innerText || el.textContent || '').trim();
+        if (!txt) return false;
+        var aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        if (aria === 'close' || aria === 'dismiss') return false;
+        return true;
+      });
+    return buttons;
+  }
+
+  async function waitForOverlayItems(timeoutMs, beforeSet) {
     var deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      var menu = document.querySelector('[role="menu"].agy-overlay') || document.querySelector('[role="menu"]');
-      if (menu) {
-        var items = menu.querySelectorAll('[role="menuitem"]');
-        if (items.length > 0) return { menu: menu, items: Array.prototype.slice.call(items) };
+      // Tag any newly mounted portals immediately so CSS hides them even on mobile sheets
+      var newPortals = findNewBodyPortals(beforeSet);
+      newPortals.forEach(function(p) { p.setAttribute('data-agy-scraped-portal', 'true'); });
+
+      // Check newly mounted portals first (most accurate for Base UI / mobile bottom sheets)
+      for (var i = newPortals.length - 1; i >= 0; i--) {
+        var portalItems = extractOverlayItems(newPortals[i]);
+        if (portalItems.length > 0) {
+          return { container: newPortals[i], items: portalItems, portals: newPortals };
+        }
       }
+
+      // Fallback: check all visible ARIA menu / listbox / dialog overlays (newest first)
+      var overlays = Array.prototype.slice.call(
+        document.querySelectorAll('[role="menu"], [role="listbox"], [role="dialog"], [aria-modal="true"], .agy-overlay')
+      );
+      for (var j = overlays.length - 1; j >= 0; j--) {
+        var overlay = overlays[j];
+        var rect = overlay.getBoundingClientRect();
+        if (rect.width <= 0 && rect.height <= 0) continue;
+        var items = extractOverlayItems(overlay);
+        if (items.length > 0) {
+          return { container: overlay, items: items, portals: newPortals };
+        }
+      }
+
       await sleep(25);
     }
     return null;
   }
 
-  function closeOpenMenu(trigger) {
-    try {
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
-      }));
-    } catch (e) {}
-    if (trigger && trigger.getAttribute('aria-expanded') === 'true') {
-      triggerElementClick(trigger);
+  async function openTriggerOverlay(trigger) {
+    if (!trigger) return;
+    if (trigger.getAttribute('aria-expanded') === 'true') return;
+    // Use plain click() first so Base UI doesn't double-toggle open+closed on pointerdown+click
+    try { trigger.click(); } catch (e) {}
+    await sleep(60);
+    if (trigger.getAttribute('aria-expanded') !== 'true') {
+      var hasOverlay = !!document.querySelector('[role="menu"], [role="listbox"], [role="dialog"], [aria-modal="true"]');
+      if (!hasOverlay) {
+        triggerElementClick(trigger);
+      }
     }
   }
 
+  async function closeOpenOverlay(trigger, found, beforeSet) {
+    var targets = [];
+    if (found && found.container) targets.push(found.container);
+    targets.push(document);
+    targets.forEach(function(t) {
+      try {
+        t.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+        }));
+      } catch (e) {}
+    });
+    await sleep(40);
+
+    // If still open, try explicit close button or backdrop click inside newly added portals
+    var remainingPortals = findNewBodyPortals(beforeSet);
+    if (remainingPortals.length > 0) {
+      remainingPortals.forEach(function(p) {
+        var closeBtn = p.querySelector('button[aria-label*="Close" i], button[aria-label*="Dismiss" i]');
+        if (closeBtn) {
+          try { closeBtn.click(); } catch (e) {}
+        } else {
+          var backdrop = p.querySelector('[data-base-ui-backdrop], [class*="backdrop"], [class*="overlay"]');
+          if (backdrop && backdrop !== found?.container) {
+            try { backdrop.click(); } catch (e) {}
+          }
+        }
+      });
+      await sleep(40);
+    }
+
+    if (trigger && trigger.getAttribute('aria-expanded') === 'true') {
+      try { trigger.click(); } catch (e) {}
+      await sleep(40);
+    }
+
+    findNewBodyPortals(beforeSet).forEach(function(p) {
+      p.removeAttribute('data-agy-scraped-portal');
+    });
+  }
+
   function parseModelMenuItem(item, currentModelLower) {
-    var fullText = (item.innerText || '').trim().replace(/\s+/g, ' ');
-    if (!fullText || /^view usage$/i.test(fullText)) return null;
+    var rawText = (item.innerText || item.textContent || '').trim();
+    var fullText = rawText.replace(/\s+/g, ' ');
+    if (!fullText || /^view usage$/i.test(fullText) || /^model$/i.test(fullText) || /^close$/i.test(fullText)) {
+      return null;
+    }
 
     var nameEl = item.querySelector('span.truncate') ||
       item.querySelector('span.shrink-0:not(.opacity-70)') ||
       item.querySelector('span');
     var effortEl = item.querySelector('span.opacity-70');
 
-    var name = nameEl ? (nameEl.innerText || '').trim() : fullText;
-    var effort = effortEl ? (effortEl.innerText || '').trim() : '';
+    var lines = rawText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+    var name = nameEl ? (nameEl.innerText || nameEl.textContent || '').trim() : (lines[0] || fullText);
+    var effort = effortEl ? (effortEl.innerText || effortEl.textContent || '').trim() : '';
+
+    if (!effort && lines.length > 1) {
+      var second = lines[1];
+      if (!/^(New|Notice|Unavailable)$/i.test(second)) {
+        effort = second;
+      }
+    }
 
     var badge = '';
     if (/\bUnavailable\b/i.test(fullText)) badge = 'Unavailable';
@@ -557,7 +816,10 @@ object AntigravityBridgeScript {
     var isSelected = item.getAttribute('aria-checked') === 'true' ||
       item.getAttribute('aria-selected') === 'true' ||
       item.getAttribute('data-selected') === 'true' ||
-      (currentModelLower && (combinedLower === currentModelLower || fullText.toLowerCase().indexOf(currentModelLower) === 0));
+      (currentModelLower && (
+        combinedLower === currentModelLower ||
+        fullText.toLowerCase().indexOf(currentModelLower) === 0
+      ));
 
     return {
       name: name,
@@ -577,13 +839,13 @@ object AntigravityBridgeScript {
     }
 
     var currentModelLower = extractTriggerLabel(trigger, /^Select model,?\s*/i).toLowerCase();
+    var beforeSet = snapshotBodyChildren();
     var body = document.body;
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
-      var wasOpen = trigger.getAttribute('aria-expanded') === 'true';
-      if (!wasOpen) triggerElementClick(trigger);
-      var found = await waitForMenuItems(700);
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
       var models = [];
       if (found) {
         found.items.forEach(function(item) {
@@ -591,8 +853,7 @@ object AntigravityBridgeScript {
           if (parsed) models.push(parsed);
         });
       }
-      closeOpenMenu(trigger);
-      await sleep(30);
+      await closeOpenOverlay(trigger, found, beforeSet);
       postToNative({ type: 'modelsList', models: models });
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
@@ -602,31 +863,35 @@ object AntigravityBridgeScript {
   async function selectModel(fullText, name) {
     var trigger = findModelTrigger();
     if (!trigger) return;
+    var beforeSet = snapshotBodyChildren();
     var body = document.body;
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
-      if (trigger.getAttribute('aria-expanded') !== 'true') {
-        triggerElementClick(trigger);
-      }
-      var found = await waitForMenuItems(700);
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
       if (found) {
         var targetFull = (fullText || '').trim().toLowerCase();
         var targetName = (name || '').trim().toLowerCase();
         var match = found.items.find(function(item) {
-          return (item.innerText || '').trim().replace(/\s+/g, ' ').toLowerCase() === targetFull;
+          return (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase() === targetFull;
         }) || found.items.find(function(item) {
-          var txt = (item.innerText || '').trim().replace(/\s+/g, ' ').toLowerCase();
+          var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ').toLowerCase();
           return targetName && txt.indexOf(targetName) === 0;
         });
 
         if (match) {
-          triggerElementClick(match);
+          try { match.click(); } catch (e) { triggerElementClick(match); }
+          await sleep(60);
+          // Ensure overlay closed if it didn't auto-dismiss on click
+          if (findNewBodyPortals(beforeSet).length > 0 && trigger.getAttribute('aria-expanded') === 'true') {
+            await closeOpenOverlay(trigger, found, beforeSet);
+          }
         } else {
-          closeOpenMenu(trigger);
+          await closeOpenOverlay(trigger, found, beforeSet);
         }
       }
-      await sleep(100);
+      await sleep(80);
       reportComposerState(true);
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
@@ -641,20 +906,20 @@ object AntigravityBridgeScript {
     }
 
     var currentLower = extractTriggerLabel(trigger, /^Agent permissions preset selector,?\s*/i).toLowerCase();
+    var beforeSet = snapshotBodyChildren();
     var body = document.body;
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
-      if (trigger.getAttribute('aria-expanded') !== 'true') {
-        triggerElementClick(trigger);
-      }
-      var found = await waitForMenuItems(700);
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
       var options = [];
       if (found) {
         found.items.forEach(function(item) {
-          var lines = (item.innerText || '').split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+          var lines = (item.innerText || item.textContent || '').split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
           if (!lines.length) return;
           var label = lines[0];
+          if (/^(permissions|close)$/i.test(label)) return;
           var desc = lines.slice(1).join(' ');
           var isSelected = item.getAttribute('aria-checked') === 'true' ||
             item.getAttribute('aria-selected') === 'true' ||
@@ -662,8 +927,7 @@ object AntigravityBridgeScript {
           options.push({ label: label, description: desc, isSelected: !!isSelected });
         });
       }
-      closeOpenMenu(trigger);
-      await sleep(30);
+      await closeOpenOverlay(trigger, found, beforeSet);
       postToNative({ type: 'permissionsList', items: options });
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
@@ -673,27 +937,27 @@ object AntigravityBridgeScript {
   async function selectPermission(label) {
     var trigger = findPermissionsTrigger();
     if (!trigger) return;
+    var beforeSet = snapshotBodyChildren();
     var body = document.body;
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
-      if (trigger.getAttribute('aria-expanded') !== 'true') {
-        triggerElementClick(trigger);
-      }
-      var found = await waitForMenuItems(700);
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
       if (found) {
         var target = (label || '').trim().toLowerCase();
         var match = found.items.find(function(item) {
-          var firstLine = ((item.innerText || '').split('\n')[0] || '').trim().toLowerCase();
+          var firstLine = ((item.innerText || item.textContent || '').split('\n')[0] || '').trim().toLowerCase();
           return firstLine === target;
         });
         if (match) {
-          triggerElementClick(match);
+          try { match.click(); } catch (e) { triggerElementClick(match); }
+          await sleep(60);
         } else {
-          closeOpenMenu(trigger);
+          await closeOpenOverlay(trigger, found, beforeSet);
         }
       }
-      await sleep(100);
+      await sleep(80);
       reportComposerState(true);
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
@@ -759,6 +1023,38 @@ object AntigravityBridgeScript {
 
       case 'selectPermission':
         selectPermission(cmd.label);
+        break;
+
+      case 'attachBatchStart':
+        if (cmd.batchId) {
+          pendingAttachBatches[cmd.batchId] = { files: [] };
+        }
+        break;
+
+      case 'attachFileStart':
+        if (cmd.batchId && pendingAttachBatches[cmd.batchId]) {
+          pendingAttachBatches[cmd.batchId].files[cmd.index] = {
+            name: cmd.name || 'file',
+            mimeType: cmd.mimeType || 'application/octet-stream',
+            chunks: []
+          };
+        }
+        break;
+
+      case 'attachFileChunk':
+        if (cmd.batchId && pendingAttachBatches[cmd.batchId] && pendingAttachBatches[cmd.batchId].files[cmd.index]) {
+          pendingAttachBatches[cmd.batchId].files[cmd.index].chunks.push(cmd.data || '');
+        }
+        break;
+
+      case 'attachBatchCommit':
+        if (cmd.batchId) {
+          commitAttachedFiles(cmd.batchId);
+        }
+        break;
+
+      case 'clearAttachments':
+        clearWebAttachments();
         break;
 
       case 'triggerAttach': {

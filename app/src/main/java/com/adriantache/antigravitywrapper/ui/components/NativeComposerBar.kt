@@ -25,8 +25,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Shield
@@ -72,6 +74,8 @@ fun NativeComposerBar(
     text: String,
     onTextChange: (String) -> Unit,
     composerState: ComposerState,
+    attachedFileNames: List<String> = emptyList(),
+    isAttaching: Boolean = false,
     isSending: Boolean,
     showVoiceButton: Boolean,
     onSend: () -> Unit,
@@ -79,6 +83,7 @@ fun NativeComposerBar(
     onOpenModelPicker: () -> Unit,
     onOpenPermissionsPicker: () -> Unit,
     onAttachClick: () -> Unit,
+    onClearAttachments: () -> Unit = {},
     onVoiceClick: () -> Unit,
     onSwitchToWebComposer: () -> Unit
 ) {
@@ -148,6 +153,61 @@ fun NativeComposerBar(
                         }
                     }
 
+                    // Attached files preview row
+                    if (attachedFileNames.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            attachedFileNames.forEach { fileName ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = ComposerChipBg
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.AttachFile,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = fileName,
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                            Surface(
+                                shape = CircleShape,
+                                color = ComposerChipBg,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .clickable(onClick = onClearAttachments)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear attachments",
+                                        tint = ComposerMutedText,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Bottom bar: Attach + Native TextField + Optional Voice + Large Send/Stop
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -157,17 +217,26 @@ fun NativeComposerBar(
                         if (composerState.hasAttach) {
                             IconButton(
                                 onClick = onAttachClick,
+                                enabled = !isAttaching,
                                 modifier = Modifier
                                     .size(42.dp)
                                     .clip(CircleShape)
                                     .background(ComposerChipBg)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Attach file",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                                if (isAttaching) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Attach file",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
 
@@ -228,8 +297,9 @@ fun NativeComposerBar(
                         }
 
                         // Large 46dp Send / Stop button
-                        val showStop = composerState.isGenerating && text.isBlank() && !isSending
-                        val canSend = text.isNotBlank() && !isSending
+                        val hasContent = text.isNotBlank() || attachedFileNames.isNotEmpty()
+                        val showStop = composerState.isGenerating && !hasContent && !isSending
+                        val canSend = hasContent && !isSending
                         val buttonColor = when {
                             showStop -> Color(0xFFD94A4A)
                             canSend -> MaterialTheme.colorScheme.primary

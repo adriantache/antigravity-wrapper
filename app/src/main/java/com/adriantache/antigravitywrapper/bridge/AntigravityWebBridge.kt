@@ -25,7 +25,8 @@ class AntigravityWebBridge(
     private val onModelsLoaded: (List<ModelOption>) -> Unit,
     private val onPermissionsLoaded: (List<PermissionOption>) -> Unit,
     private val onScrollStateChanged: (Boolean) -> Unit,
-    private val onSendResult: (ok: Boolean, error: String?) -> Unit
+    private val onSendResult: (ok: Boolean, error: String?) -> Unit,
+    private val onAttachResult: (ok: Boolean, fileNames: List<String>, error: String?) -> Unit = { _, _, _ -> }
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val frameProxies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
@@ -112,6 +113,10 @@ class AntigravityWebBridge(
                 postToMain { onSendResult(event.ok, event.error) }
             }
 
+            is BridgeEvent.AttachResult -> {
+                postToMain { onAttachResult(event.ok, event.fileNames, event.error) }
+            }
+
             is BridgeEvent.WebNotification -> {
                 NotificationHelper.showNotification(
                     context = context,
@@ -160,6 +165,49 @@ class AntigravityWebBridge(
 
     fun selectPermission(option: PermissionOption) {
         postToComposerFrame(ComposerBridgeProtocol.encodeSelectPermission(option.label))
+    }
+
+    fun attachFiles(files: List<AttachedFilePayload>): Boolean {
+        if (files.isEmpty()) return false
+        val batchId = "b_${System.nanoTime()}"
+        if (!postToComposerFrame(ComposerBridgeProtocol.encodeAttachBatchStart(batchId, files.size))) {
+            return false
+        }
+        val chunkSize = 200_000
+        files.forEachIndexed { index, file ->
+            if (!postToComposerFrame(
+                    ComposerBridgeProtocol.encodeAttachFileStart(
+                        batchId = batchId,
+                        index = index,
+                        name = file.name,
+                        mimeType = file.mimeType
+                    )
+                )
+            ) {
+                return false
+            }
+            var offset = 0
+            val data = file.base64Data
+            while (offset < data.length) {
+                val end = (offset + chunkSize).coerceAtMost(data.length)
+                if (!postToComposerFrame(
+                        ComposerBridgeProtocol.encodeAttachFileChunk(
+                            batchId = batchId,
+                            index = index,
+                            data = data.substring(offset, end)
+                        )
+                    )
+                ) {
+                    return false
+                }
+                offset = end
+            }
+        }
+        return postToComposerFrame(ComposerBridgeProtocol.encodeAttachBatchCommit(batchId))
+    }
+
+    fun clearAttachments() {
+        postToComposerFrame(ComposerBridgeProtocol.encodeSimpleCommand("clearAttachments"))
     }
 
     fun triggerAttach() {
