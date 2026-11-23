@@ -3,6 +3,8 @@ package com.adriantache.antigravitywrapper
 import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.BridgeEvent
 import com.adriantache.antigravitywrapper.bridge.ComposerBridgeProtocol
+import com.adriantache.antigravitywrapper.ui.components.EnterKeyAction
+import com.adriantache.antigravitywrapper.ui.components.resolveExternalKeyboardEnterAction
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -222,5 +224,75 @@ class ComposerBridgeProtocolTest {
         val batchCommit = JSONObject(ComposerBridgeProtocol.encodeAttachBatchCommit("b_1"))
         assertEquals("attachBatchCommit", batchCommit.getString("type"))
         assertEquals("b_1", batchCommit.getString("batchId"))
+    }
+
+    @Test
+    fun externalKeyboardEnter_sendsOnReturnAndNewlinesOnShiftReturn() {
+        assertEquals(
+            EnterKeyAction.SEND,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = true,
+                isShiftPressed = false,
+                isKeyDown = true,
+                repeatCount = 0,
+                canSend = true
+            )
+        )
+        assertEquals(
+            EnterKeyAction.PASS_THROUGH,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = true,
+                isShiftPressed = true,
+                isKeyDown = true,
+                repeatCount = 0,
+                canSend = true
+            )
+        )
+        assertEquals(
+            EnterKeyAction.PASS_THROUGH,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = false,
+                isShiftPressed = false,
+                isKeyDown = true,
+                repeatCount = 0,
+                canSend = true
+            )
+        )
+        assertEquals(
+            EnterKeyAction.CONSUME_ONLY,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = true,
+                isShiftPressed = false,
+                isKeyDown = true,
+                repeatCount = 1,
+                canSend = true
+            )
+        )
+        assertEquals(
+            EnterKeyAction.CONSUME_ONLY,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = true,
+                isShiftPressed = false,
+                isKeyDown = true,
+                repeatCount = 0,
+                canSend = false
+            )
+        )
+        assertEquals(
+            EnterKeyAction.CONSUME_ONLY,
+            resolveExternalKeyboardEnterAction(
+                isEnterKey = true,
+                isHardwareKeyboard = true,
+                isShiftPressed = false,
+                isKeyDown = false,
+                repeatCount = 0,
+                canSend = true
+            )
+        )
     }
 }

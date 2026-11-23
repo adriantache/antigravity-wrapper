@@ -272,6 +272,7 @@ object AntigravityBridgeScript {
       '  pointer-events: none !important;' +
       '  overflow: visible !important;' +
       '}' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"] .agy-empty-shell-inner,' +
       'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell .surface-composer,' +
       'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell [id="antigravity.agentSidePanelInputBox"] {' +
       '  height: 0 !important;' +
@@ -358,6 +359,22 @@ object AntigravityBridgeScript {
     return true;
   }
 
+  function hasVisibleContentExcluding(container, excludedSet) {
+    if (!container) return false;
+    var children = Array.prototype.slice.call(container.children);
+    for (var i = 0; i < children.length; i++) {
+      var child = children[i];
+      if (excludedSet.has(child)) continue;
+      var cs = window.getComputedStyle(child);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
+      var txt = (child.innerText || child.textContent || '').trim();
+      if (txt.length > 0 || child.querySelector('button, a, img, svg, [role="button"]')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function syncBodyClasses() {
     var body = document.body;
     if (!body) return;
@@ -370,10 +387,20 @@ object AntigravityBridgeScript {
       body.classList.remove('agy-native-composer-active');
     }
     if (root) {
-      var hasHeaderTrigger = !!root.querySelector(
-        '[data-testid="project-selector-trigger"], [data-testid="branch-pill-trigger"], [data-testid="location-selector-trigger"]'
-      );
-      if (isNativeActive && !hasHeaderTrigger) {
+      var card = root.querySelector('.surface-composer-card');
+      var shell = root.querySelector('.surface-composer, [id="antigravity.agentSidePanelInputBox"]');
+      var shellHasExtra = shell ? hasVisibleContentExcluding(shell, new Set([card])) : false;
+      var rootHasExtra = hasVisibleContentExcluding(root, new Set([card, shell]));
+
+      if (shell) {
+        if (isNativeActive && !shellHasExtra) {
+          shell.classList.add('agy-empty-shell-inner');
+        } else {
+          shell.classList.remove('agy-empty-shell-inner');
+        }
+      }
+
+      if (isNativeActive && !rootHasExtra && !shellHasExtra) {
         root.classList.add('agy-empty-composer-shell');
       } else {
         root.classList.remove('agy-empty-composer-shell');

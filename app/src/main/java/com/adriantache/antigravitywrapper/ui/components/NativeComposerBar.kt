@@ -1,5 +1,6 @@
 package com.adriantache.antigravitywrapper.ui.components
 
+import android.view.InputDevice
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,6 +54,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -68,6 +75,37 @@ private val ComposerCardBg = Color(0xFF1A1A1D)
 private val ComposerBorder = Color(0xFF2D2D32)
 private val ComposerChipBg = Color(0xFF242429)
 private val ComposerMutedText = Color(0xFF9A9AA2)
+
+internal enum class EnterKeyAction {
+    SEND,
+    CONSUME_ONLY,
+    PASS_THROUGH
+}
+
+internal fun resolveExternalKeyboardEnterAction(
+    isEnterKey: Boolean,
+    isHardwareKeyboard: Boolean,
+    isShiftPressed: Boolean,
+    isKeyDown: Boolean,
+    repeatCount: Int,
+    canSend: Boolean
+): EnterKeyAction {
+    if (!isEnterKey || !isHardwareKeyboard || isShiftPressed) {
+        return EnterKeyAction.PASS_THROUGH
+    }
+    return if (isKeyDown && repeatCount == 0 && canSend) {
+        EnterKeyAction.SEND
+    } else {
+        EnterKeyAction.CONSUME_ONLY
+    }
+}
+
+private fun isHardwareKeyboardEvent(nativeEvent: android.view.KeyEvent): Boolean {
+    if (nativeEvent.deviceId <= 0) return false
+    val device = InputDevice.getDevice(nativeEvent.deviceId) ?: return false
+    return !device.isVirtual &&
+        (device.sources and InputDevice.SOURCE_KEYBOARD) == InputDevice.SOURCE_KEYBOARD
+}
 
 @Composable
 fun NativeComposerBar(
@@ -211,6 +249,10 @@ fun NativeComposerBar(
                         }
                     }
 
+                    val hasContent = text.isNotBlank() || attachedFileNames.isNotEmpty()
+                    val showStop = composerState.isGenerating && !hasContent && !isSending
+                    val canSend = hasContent && !isSending
+
                     // Bottom bar: Attach + Native TextField + Optional Voice + Large Send/Stop
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -266,7 +308,27 @@ fun NativeComposerBar(
                             BasicTextField(
                                 value = text,
                                 onValueChange = onTextChange,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onPreviewKeyEvent { keyEvent ->
+                                        val isEnter = keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter
+                                        val action = resolveExternalKeyboardEnterAction(
+                                            isEnterKey = isEnter,
+                                            isHardwareKeyboard = isHardwareKeyboardEvent(keyEvent.nativeKeyEvent),
+                                            isShiftPressed = keyEvent.isShiftPressed,
+                                            isKeyDown = keyEvent.type == KeyEventType.KeyDown,
+                                            repeatCount = keyEvent.nativeKeyEvent.repeatCount,
+                                            canSend = canSend
+                                        )
+                                        when (action) {
+                                            EnterKeyAction.SEND -> {
+                                                onSend()
+                                                true
+                                            }
+                                            EnterKeyAction.CONSUME_ONLY -> true
+                                            EnterKeyAction.PASS_THROUGH -> false
+                                        }
+                                    },
                                 textStyle = TextStyle(
                                     color = Color.White,
                                     fontSize = 15.sp,
@@ -300,9 +362,6 @@ fun NativeComposerBar(
                         }
 
                         // Large 46dp Send / Stop button
-                        val hasContent = text.isNotBlank() || attachedFileNames.isNotEmpty()
-                        val showStop = composerState.isGenerating && !hasContent && !isSending
-                        val canSend = hasContent && !isSending
                         val buttonColor = when {
                             showStop -> Color(0xFFD94A4A)
                             canSend -> MaterialTheme.colorScheme.primary
