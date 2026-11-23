@@ -151,13 +151,13 @@ fun ConnectionErrorOverlay(
                     )
                 }
 
-                if (onResetDefault != null && !failingUrl.startsWith("https://antigravity.google")) {
+                if (onResetDefault != null && !failingUrl.startsWith("https://antigravity.google.com")) {
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
                         onClick = onResetDefault,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Connect to https://antigravity.google")
+                        Text("Connect to Default URL")
                     }
                 }
 

@@ -99,7 +99,7 @@ fun SettingsDialog(
                         onClick = { urlInput = PreferencesManager.DEFAULT_URL },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Reset to https://antigravity.google", fontSize = 12.sp)
+                        Text("Reset to Default URL", fontSize = 12.sp)
                     }
                 }
 

@@ -31,6 +31,30 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Deep link filter for https://antigravity.google.com -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="antigravity.google.com" />
+            </intent-filter>
+
+            <!-- Deep link filter for subdomains (*.antigravity.google.com) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="https" />
+                <data android:scheme="http" />
+                <data android:host="*.antigravity.google.com" />
+            </intent-filter>
+
             <!-- Deep link filter for https://antigravity.google -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />

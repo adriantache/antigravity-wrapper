@@ -15,7 +15,7 @@ class PreferencesManager(context: Context) {
         private const val KEY_PULL_TO_REFRESH = "pull_to_refresh"
         private const val KEY_DOUBLE_BACK_EXIT = "double_back_exit"
 
-        const val DEFAULT_URL = "https://antigravity.google"
+        const val DEFAULT_URL = "https://antigravity.google.com/remote?path=%2Fview%2Fremote-control"
     }
 
     var serverUrl: String

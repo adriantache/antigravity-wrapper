@@ -1,5 +1,6 @@
 package com.adriantache.antigravitywrapper
 
+import com.adriantache.antigravitywrapper.data.PreferencesManager
 import com.adriantache.antigravitywrapper.util.UrlNavigationAction
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import org.junit.Assert.assertEquals
@@ -7,10 +8,22 @@ import org.junit.Test
 
 class UrlPolicyTest {
 
-    private val defaultServer = "https://antigravity.google"
+    private val defaultServer = PreferencesManager.DEFAULT_URL
 
     @Test
     fun antigravityHosts_stayInWebView() {
+        assertEquals(
+            UrlNavigationAction.ALLOW_IN_WEBVIEW,
+            UrlPolicy.classifyNavigation("https", "antigravity.google.com", -1, true, defaultServer)
+        )
+        assertEquals(
+            UrlNavigationAction.ALLOW_IN_WEBVIEW,
+            UrlPolicy.classifyNavigation("https", "app.antigravity.google.com", -1, true, defaultServer)
+        )
+        assertEquals(
+            UrlNavigationAction.ALLOW_IN_WEBVIEW,
+            UrlPolicy.classifyNavigation("HTTPS", "Antigravity.Google.Com.", -1, true, defaultServer)
+        )
         assertEquals(
             UrlNavigationAction.ALLOW_IN_WEBVIEW,
             UrlPolicy.classifyNavigation("https", "antigravity.google", -1, true, defaultServer)
@@ -34,6 +47,14 @@ class UrlPolicyTest {
         assertEquals(
             UrlNavigationAction.OPEN_EXTERNALLY,
             UrlPolicy.classifyNavigation("https", "antigravity.google.evil.com", -1, true, defaultServer)
+        )
+        assertEquals(
+            UrlNavigationAction.OPEN_EXTERNALLY,
+            UrlPolicy.classifyNavigation("https", "evilantigravity.google.com", -1, true, defaultServer)
+        )
+        assertEquals(
+            UrlNavigationAction.OPEN_EXTERNALLY,
+            UrlPolicy.classifyNavigation("https", "antigravity.google.com.evil.com", -1, true, defaultServer)
         )
     }
 

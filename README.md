@@ -1,26 +1,26 @@
 # Antigravity Wrapper
 
-An Android WebView wrapper app for [Antigravity](https://antigravity.google), built with Kotlin and Jetpack Compose.
+An Android WebView wrapper app for [Antigravity](https://antigravity.google.com/remote?path=%2Fview%2Fremote-control), built with Kotlin and Jetpack Compose.
 
 ## How to Use
 
 ### 1. Getting the URL
 
-Out of the box, Antigravity Wrapper connects to **`https://antigravity.google`**, the official Antigravity web interface.
+Out of the box, Antigravity Wrapper connects to **`https://antigravity.google.com/remote?path=%2Fview%2Fremote-control`**, the official Antigravity remote control web interface.
 
 - **Official Web Interface (Recommended)**:
-  1. Launch the app—it loads `https://antigravity.google` by default.
+  1. Launch the app—it loads `https://antigravity.google.com/remote?path=%2Fview%2Fremote-control` by default.
   2. Sign in with your Google account to access your remote Antigravity sessions.
   > **Note on Google Sign-In:** Android `WebView` maintains its own isolated cookie and session storage, separate from Chrome and your device's system Google accounts. Even if you are already signed in to Google in your browser or on your phone, you will need to log in to your Google account once inside the app (and again if you use **Clear WebView Cache & Cookies**).
 - **Custom / Local / Tunneled URL**:
   If you are connecting to a specific session link or a self-hosted/tunneled instance:
-  1. Copy the URL from your Antigravity desktop/web session (for example, a `https://antigravity.google/...` session link, a Tailscale/tunnel URL, or a LAN address like `http://192.168.x.x:<port>`).
+  1. Copy the URL from your Antigravity desktop/web session (for example, a `https://antigravity.google.com/...` session link, a Tailscale/tunnel URL, or a LAN address like `http://192.168.x.x:<port>`).
   2. In the app, tap the **floating control pill** (`⋮`) and select the **Settings** (gear) icon.
   3. Paste the URL into **Remote Antigravity URL** and tap **Save & Connect**.
      - If you omit `http://` or `https://`, the app automatically prepends `http://`.
-     - You can switch back anytime using **Reset to `https://antigravity.google`** or pick from **Recent Sessions**.
+     - You can switch back anytime using **Reset to Default URL** or pick from **Recent Sessions**.
 - **Deep Links**:
-  The app also registers for `https://antigravity.google`, `*.antigravity.google`, and `antigravity://` links, so opening those URLs from notifications or other apps can launch directly into Antigravity Wrapper.
+  The app also registers for `https://antigravity.google.com`, `*.antigravity.google.com`, `https://antigravity.google`, `*.antigravity.google`, and `antigravity://` links, so opening those URLs from notifications or other apps can launch directly into Antigravity Wrapper.
 
 ### 2. Controls & Navigation
 

@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.adriantache.antigravitywrapper.MainActivity
 import com.adriantache.antigravitywrapper.R
+import com.adriantache.antigravitywrapper.data.PreferencesManager
 
 object NotificationHelper {
     const val CHANNEL_ID = "antigravity_notifications"
@@ -40,7 +41,7 @@ object NotificationHelper {
     ) {
         createNotificationChannel(context)
 
-        val normalizedUrl = if (!targetUrl.isNullOrBlank()) normalizeUrl(targetUrl) else "https://antigravity.google"
+        val normalizedUrl = if (!targetUrl.isNullOrBlank()) normalizeUrl(targetUrl) else PreferencesManager.DEFAULT_URL
 
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
@@ -78,10 +79,10 @@ object NotificationHelper {
             trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
             trimmed.startsWith("antigravity://", ignoreCase = true) -> {
                 val path = trimmed.substring("antigravity://".length).removePrefix("/")
-                "https://antigravity.google/$path"
+                if (path.isEmpty()) PreferencesManager.DEFAULT_URL else "https://antigravity.google.com/$path"
             }
-            trimmed.startsWith("/") -> "https://antigravity.google$trimmed"
-            else -> "https://antigravity.google/$trimmed"
+            trimmed.startsWith("/") -> "https://antigravity.google.com$trimmed"
+            else -> "https://antigravity.google.com/$trimmed"
         }
     }
 

@@ -60,7 +60,10 @@ object UrlPolicy {
     }
 
     private fun isAntigravityHost(host: String): Boolean {
-        return host == "antigravity.google" || host.endsWith(".antigravity.google")
+        return host == "antigravity.google" ||
+            host.endsWith(".antigravity.google") ||
+            host == "antigravity.google.com" ||
+            host.endsWith(".antigravity.google.com")
     }
 
     private fun matchesConfiguredServer(
