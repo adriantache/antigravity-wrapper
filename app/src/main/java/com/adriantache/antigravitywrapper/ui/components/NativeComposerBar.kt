@@ -1010,8 +1010,29 @@ fun UsageOverlayCard(
                                     fontWeight = FontWeight.SemiBold
                                 )
                             }
-                            section.items.forEach { item ->
-                                UsageQuotaRow(item = item)
+                            // Place short-term (5h) tile first, then Weekly, side-by-side
+                            val orderedItems = section.items.sortedBy { item ->
+                                when {
+                                    item.label.contains("5h", ignoreCase = true) -> 0
+                                    item.label.contains("weekly", ignoreCase = true) -> 1
+                                    else -> 2
+                                }
+                            }
+                            orderedItems.chunked(2).forEach { rowItems ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowItems.forEach { item ->
+                                        UsageStatTile(
+                                            item = item,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                    if (rowItems.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
                             }
                         }
                     }
@@ -1022,58 +1043,95 @@ fun UsageOverlayCard(
 }
 
 @Composable
-private fun UsageQuotaRow(item: UsageQuotaItem) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+private fun UsageStatTile(
+    item: UsageQuotaItem,
+    modifier: Modifier = Modifier
+) {
+    val shortLabel = item.label
+        .replace(Regex("\\s*limit$", RegexOption.IGNORE_CASE), "")
+        .trim()
+        .ifEmpty { item.label }
+    val shortReset = item.resetText
+        .replace(Regex("^Resets\\s+", RegexOption.IGNORE_CASE), "")
+        .trim()
+    val percentDisplay = if (item.percentLeft in 0..100) {
+        "${item.percentLeft}%"
+    } else {
+        item.percentText
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = ComposerChipBg
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.label,
-                color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            if (item.resetText.isNotBlank()) {
-                Text(
-                    text = item.resetText,
-                    color = ComposerMutedText,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (item.percentLeft in 0..100) {
+                UsageRingGauge(
+                    percentLeft = item.percentLeft,
+                    sizeDp = 24
                 )
             }
-        }
-
-        if (item.percentText.isNotBlank()) {
-            Text(
-                text = item.percentText,
-                color = Color.White.copy(alpha = 0.9f),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
-
-        if (item.percentLeft in 0..100) {
-            UsageRingGauge(percentLeft = item.percentLeft)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    if (percentDisplay.isNotBlank()) {
+                        Text(
+                            text = percentDisplay,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
+                        )
+                    }
+                    Text(
+                        text = shortLabel,
+                        color = ComposerMutedText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                if (shortReset.isNotBlank()) {
+                    Text(
+                        text = shortReset,
+                        color = ComposerMutedText.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun UsageRingGauge(percentLeft: Int) {
+private fun UsageRingGauge(
+    percentLeft: Int,
+    sizeDp: Int = 24
+) {
     val gaugeColor = when {
         percentLeft >= 40 -> Color(0xFF4CAF50)
         percentLeft >= 15 -> Color(0xFFFFB300)
         else -> Color(0xFFE55353)
     }
-    val trackColor = Color(0xFF2E3238)
+    val trackColor = Color(0xFF33373E)
 
-    Canvas(modifier = Modifier.size(18.dp)) {
-        val strokeWidth = 2.4.dp.toPx()
+    Canvas(modifier = Modifier.size(sizeDp.dp)) {
+        val strokeWidth = 2.8.dp.toPx()
         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         drawArc(
             color = trackColor,

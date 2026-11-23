@@ -162,7 +162,8 @@ object AntigravityBridgeScript {
 
   function extractTriggerLabel(el, prefixRegex) {
     if (!el) return '';
-    var txt = (el.innerText || '').trim().replace(/\s+/g, ' ');
+    // Use textContent instead of innerText to avoid forcing synchronous Blink layout reflows
+    var txt = (el.textContent || '').trim().replace(/\s+/g, ' ');
     if (txt) return txt;
     var aria = el.getAttribute('aria-label') || '';
     var match = aria.match(/current:\s*(.+)$/i);
@@ -379,7 +380,8 @@ object AntigravityBridgeScript {
       if (excludedSet.has(child)) continue;
       var cs = window.getComputedStyle(child);
       if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
-      var txt = (child.innerText || child.textContent || '').trim();
+      // Use textContent instead of innerText to avoid synchronous full-page layout reflows
+      var txt = (child.textContent || '').trim();
       if (txt.length > 0 || child.querySelector('button, a, img, svg, [role="button"]')) {
         return true;
       }
@@ -387,11 +389,11 @@ object AntigravityBridgeScript {
     return false;
   }
 
-  function syncBodyClasses() {
+  function syncBodyClasses(cachedHasComposer) {
     var body = document.body;
-    if (!body) return;
+    if (!body) return false;
     var root = findComposerRoot();
-    var hasComposer = isComposerActuallyVisible();
+    var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isComposerActuallyVisible();
     var isNativeActive = config.nativeComposerEnabled && hasComposer;
     if (isNativeActive) {
       body.classList.add('agy-native-composer-active');
@@ -399,6 +401,7 @@ object AntigravityBridgeScript {
       body.classList.remove('agy-native-composer-active');
     }
     if (root) {
+      attachComposerObserver(root);
       var card = root.querySelector('.surface-composer-card');
       var shell = root.querySelector('.surface-composer, [id="antigravity.agentSidePanelInputBox"]');
       var shellHasExtra = shell ? hasVisibleContentExcluding(shell, new Set([card])) : false;
@@ -444,6 +447,7 @@ object AntigravityBridgeScript {
     } else {
       body.classList.remove('agy-tablet-scroll');
     }
+    return hasComposer;
   }
 
   // 4. Focus guards:
@@ -483,8 +487,27 @@ object AntigravityBridgeScript {
   }
 
   // 5. State observation
-  function computeComposerState() {
-    var hasComposer = isComposerActuallyVisible();
+  var observedComposerRoot = null;
+  var composerObserver = null;
+  var structuralTimer = null;
+
+  function attachComposerObserver(root) {
+    if (!root || root === observedComposerRoot) return;
+    if (composerObserver) {
+      try { composerObserver.disconnect(); } catch (e) {}
+    }
+    observedComposerRoot = root;
+    composerObserver = new MutationObserver(scheduleStateReport);
+    composerObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['disabled', 'aria-label', 'aria-expanded', 'aria-disabled', 'hidden', 'aria-hidden']
+    });
+  }
+
+  function computeComposerState(cachedHasComposer) {
+    var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isComposerActuallyVisible();
     var modelTrigger = findModelTrigger();
     var permTrigger = findPermissionsTrigger();
     var stopBtn = findStopButton();
@@ -522,8 +545,8 @@ object AntigravityBridgeScript {
   }
 
   function reportComposerState(force) {
-    syncBodyClasses();
-    var state = computeComposerState();
+    var hasComposer = syncBodyClasses();
+    var state = computeComposerState(hasComposer);
     var json = JSON.stringify(state);
     if (force || json !== lastStateJson) {
       lastStateJson = json;
@@ -537,6 +560,20 @@ object AntigravityBridgeScript {
       stateTimer = null;
       reportComposerState(false);
     }, 120);
+  }
+
+  function scheduleStructuralReport() {
+    if (structuralTimer) return;
+    structuralTimer = setTimeout(function() {
+      structuralTimer = null;
+      var currentRoot = findComposerRoot();
+      if (currentRoot !== observedComposerRoot) {
+        if (currentRoot) attachComposerObserver(currentRoot);
+        reportComposerState(false);
+      } else {
+        reportComposerState(false);
+      }
+    }, 300);
   }
 
   // 6. Inner SPA scroll tracking for native Pull-to-Refresh
@@ -1614,8 +1651,10 @@ object AntigravityBridgeScript {
 
     var target = document.body || document.documentElement;
     if (target) {
-      var observer = new MutationObserver(scheduleStateReport);
-      observer.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled', 'aria-label', 'aria-expanded', 'aria-disabled', 'class', 'style', 'hidden', 'aria-hidden'] });
+      // Lightweight structural observer on body (NO attribute observation on thousands of chat nodes!)
+      // Detailed attribute/subtree watching is scoped strictly to [data-testid="agent-input-box"].
+      var bodyObserver = new MutationObserver(scheduleStructuralReport);
+      bodyObserver.observe(target, { childList: true, subtree: true });
       if (typeof ResizeObserver === 'function') {
         try {
           var ro = new ResizeObserver(scheduleStateReport);
@@ -1624,11 +1663,17 @@ object AntigravityBridgeScript {
       }
     }
 
-    document.addEventListener('transitionend', scheduleStateReport, true);
-    document.addEventListener('animationend', scheduleStateReport, true);
+    document.addEventListener('transitionend', function(e) {
+      var prop = e && e.propertyName;
+      if (prop === 'transform' || prop === 'width' || prop === 'left' || prop === 'margin-left') {
+        scheduleStateReport();
+      }
+    }, true);
     document.addEventListener('click', scheduleStateReport, true);
     window.addEventListener('resize', scheduleStateReport);
 
+    var initialRoot = findComposerRoot();
+    if (initialRoot) attachComposerObserver(initialRoot);
     reportComposerState(true);
   }
 

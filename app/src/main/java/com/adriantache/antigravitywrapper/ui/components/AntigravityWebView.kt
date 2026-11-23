@@ -170,6 +170,7 @@ fun AntigravityWebView(
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 setBackgroundColor(android.graphics.Color.parseColor("#101010"))
+                setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
 
                 settings.apply {
                     javaScriptEnabled = true
