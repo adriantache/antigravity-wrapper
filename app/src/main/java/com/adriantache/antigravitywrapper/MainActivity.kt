@@ -82,6 +82,7 @@ import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.ComposerState
 import com.adriantache.antigravitywrapper.bridge.ModelOption
 import com.adriantache.antigravitywrapper.bridge.PermissionOption
+import com.adriantache.antigravitywrapper.bridge.UsageSection
 import com.adriantache.antigravitywrapper.data.PreferencesManager
 import com.adriantache.antigravitywrapper.ui.components.AntigravityWebView
 import com.adriantache.antigravitywrapper.ui.components.ConnectionErrorOverlay
@@ -90,6 +91,7 @@ import com.adriantache.antigravitywrapper.ui.components.ModelPickerBottomSheet
 import com.adriantache.antigravitywrapper.ui.components.NativeComposerBar
 import com.adriantache.antigravitywrapper.ui.components.PermissionsPickerBottomSheet
 import com.adriantache.antigravitywrapper.ui.components.SettingsDialog
+import com.adriantache.antigravitywrapper.ui.components.UsageOverlayCard
 import com.adriantache.antigravitywrapper.ui.components.dispatchEscapeEvent
 import com.adriantache.antigravitywrapper.ui.theme.AntigravityWrapperTheme
 import com.adriantache.antigravitywrapper.util.NotificationHelper
@@ -245,6 +247,12 @@ fun AntigravityApp(
     var isLoadingPermissions by remember { mutableStateOf(false) }
     var availablePermissions by remember { mutableStateOf<List<PermissionOption>>(emptyList()) }
 
+    // Floating Usage card state (stays above composer without dismissing keyboard)
+    var showUsageCard by remember { mutableStateOf(false) }
+    var isLoadingUsage by remember { mutableStateOf(false) }
+    var usageSections by remember { mutableStateOf<List<UsageSection>>(emptyList()) }
+    var showAllUsageSections by remember { mutableStateOf(false) }
+
     // Bidirectional WebMessage bridge to the Antigravity iframe
     val webBridge = remember(context) {
         AntigravityWebBridge(
@@ -277,6 +285,10 @@ fun AntigravityApp(
             onPermissionsLoaded = { options ->
                 availablePermissions = options
                 isLoadingPermissions = false
+            },
+            onUsageLoaded = { sections ->
+                usageSections = sections
+                isLoadingUsage = false
             },
             onScrollStateChanged = { canScroll ->
                 innerSpaCanScrollUp = canScroll
@@ -406,12 +418,21 @@ fun AntigravityApp(
         }
     }
 
-    // Guard against stuck model loading spinner
+    // Guard against stuck model/usage loading spinners
     LaunchedEffect(isLoadingModels) {
         if (isLoadingModels) {
             delay(3000L)
             if (isLoadingModels) {
                 isLoadingModels = false
+            }
+        }
+    }
+
+    LaunchedEffect(isLoadingUsage) {
+        if (isLoadingUsage) {
+            delay(3000L)
+            if (isLoadingUsage) {
+                isLoadingUsage = false
             }
         }
     }
@@ -481,6 +502,10 @@ fun AntigravityApp(
 
     // Back gesture interception
     BackHandler(enabled = true) {
+        if (showUsageCard) {
+            showUsageCard = false
+            return@BackHandler
+        }
         if (showModelSheet) {
             showModelSheet = false
             return@BackHandler
@@ -632,7 +657,7 @@ fun AntigravityApp(
             // Native Jetpack Compose Composer Bar (slides smoothly with keyboard at full refresh rate)
             if (showNativeComposer) {
                 val containerWidthDp = with(density) { containerWidthPx.toDp() }
-                val composerModifier = if (isSplitLayout && containerWidthPx > 0) {
+                val splitPlacement = if (isSplitLayout && containerWidthPx > 0) {
                     val rawStartDp = containerWidthDp * composerState.composerLeftFraction
                     val rawEndDp = containerWidthDp * composerState.composerRightFraction
                     val minBarWidthDp = 320.dp.coerceAtMost(containerWidthDp)
@@ -643,16 +668,58 @@ fun AntigravityApp(
                         0.dp,
                         (containerWidthDp - barWidthDp).coerceAtLeast(0.dp)
                     )
+                    barStartDp to barWidthDp
+                } else {
+                    null
+                }
+
+                val composerModifier = if (splitPlacement != null) {
                     Modifier
                         .align(Alignment.BottomStart)
-                        .offset(x = barStartDp)
-                        .width(barWidthDp)
+                        .offset(x = splitPlacement.first)
+                        .width(splitPlacement.second)
                         .padding(bottom = imeCurrentOverlapDp)
                 } else {
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .padding(bottom = imeCurrentOverlapDp)
+                }
+
+                // Floating Usage card directly above the input bar (preserves focus & keyboard)
+                if (showUsageCard) {
+                    val usageModifier = if (splitPlacement != null) {
+                        Modifier
+                            .align(Alignment.BottomStart)
+                            .offset(x = splitPlacement.first)
+                            .width(splitPlacement.second)
+                            .padding(bottom = composerHeightDp + imeCurrentOverlapDp + 4.dp)
+                    } else {
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(bottom = composerHeightDp + imeCurrentOverlapDp + 4.dp)
+                    }
+
+                    UsageOverlayCard(
+                        modifier = usageModifier,
+                        sections = usageSections,
+                        currentModel = composerState.currentModel,
+                        isLoading = isLoadingUsage,
+                        showAllSections = showAllUsageSections,
+                        onToggleShowAll = { showAllUsageSections = !showAllUsageSections },
+                        onRefresh = {
+                            isLoadingUsage = true
+                            if (!webBridge.requestUsage()) {
+                                isLoadingUsage = false
+                            }
+                        },
+                        onOpenWebUsage = {
+                            showUsageCard = false
+                            webBridge.openUsage()
+                        },
+                        onDismiss = { showUsageCard = false }
+                    )
                 }
 
                 NativeComposerBar(
@@ -667,10 +734,12 @@ fun AntigravityApp(
                     isSending = isSendingMessage,
                     showVoiceButton = isShowVoiceButtonEnabled,
                     isFloatingOverlay = isSplitLayout,
+                    isUsageOpen = showUsageCard,
                     focusRequester = composerFocusRequester,
                     onSend = { fromHardwareKeyboard ->
                         val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
                         if (hasContent && !isSendingMessage) {
+                            showUsageCard = false
                             lastSendWasHardwareKeyboard = fromHardwareKeyboard
                             isSendingMessage = true
                             val posted = webBridge.sendMessage(draftText)
@@ -687,10 +756,23 @@ fun AntigravityApp(
                         webBridge.stopGeneration()
                     },
                     onOpenModelPicker = {
+                        showUsageCard = false
                         showModelSheet = true
                         isLoadingModels = true
                         if (!webBridge.requestModels()) {
                             isLoadingModels = false
+                        }
+                    },
+                    onOpenUsage = {
+                        if (showUsageCard) {
+                            showUsageCard = false
+                        } else {
+                            showUsageCard = true
+                            showAllUsageSections = false
+                            isLoadingUsage = true
+                            if (!webBridge.requestUsage()) {
+                                isLoadingUsage = false
+                            }
                         }
                     },
                     onOpenPermissionsPicker = {
@@ -816,7 +898,12 @@ fun AntigravityApp(
                         modelSubParentName = null
                         modelSubParentFullText = null
                         modelSubOptions = emptyList()
-                        webBridge.openUsage()
+                        showUsageCard = true
+                        showAllUsageSections = false
+                        isLoadingUsage = true
+                        if (!webBridge.requestUsage()) {
+                            isLoadingUsage = false
+                        }
                     },
                     onDismiss = {
                         showModelSheet = false

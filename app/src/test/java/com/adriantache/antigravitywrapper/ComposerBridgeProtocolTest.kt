@@ -3,6 +3,8 @@ package com.adriantache.antigravitywrapper
 import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.BridgeEvent
 import com.adriantache.antigravitywrapper.bridge.ComposerBridgeProtocol
+import com.adriantache.antigravitywrapper.bridge.UsageQuotaItem
+import com.adriantache.antigravitywrapper.bridge.UsageSection
 import com.adriantache.antigravitywrapper.ui.components.EnterKeyAction
 import com.adriantache.antigravitywrapper.ui.components.resolveExternalKeyboardEnterAction
 import org.json.JSONObject
@@ -167,6 +169,60 @@ class ComposerBridgeProtocolTest {
             BridgeEvent.RequestNativeFocus,
             ComposerBridgeProtocol.parseEvent("""{"type":"requestNativeFocus"}""")
         )
+
+        val usage = ComposerBridgeProtocol.parseEvent(
+            """
+            {
+              "type": "usageLoaded",
+              "sections": [
+                {
+                  "title": "Gemini Models",
+                  "items": [
+                    {"label": "Weekly limit", "percentLeft": 91, "percentText": "91% left", "resetText": "Resets in 6d 21h"},
+                    {"label": "5h limit", "percentLeft": 67, "percentText": "67% left", "resetText": "Resets in 2h 24m"}
+                  ]
+                },
+                {
+                  "title": "Claude and GPT models",
+                  "items": [
+                    {"label": "Weekly limit", "percentLeft": 100, "percentText": "100% left", "resetText": ""}
+                  ]
+                }
+              ]
+            }
+            """.trimIndent()
+        ) as BridgeEvent.UsageLoaded
+        assertEquals(2, usage.sections.size)
+        assertEquals("Gemini Models", usage.sections[0].title)
+        assertEquals(91, usage.sections[0].items[0].percentLeft)
+        assertEquals("Resets in 6d 21h", usage.sections[0].items[0].resetText)
+    }
+
+    @Test
+    fun filterRelevantUsageSections_matchesActiveModelFamily() {
+        val sections = listOf(
+            UsageSection("Gemini Models", listOf(UsageQuotaItem("5h limit", 67, "67% left"))),
+            UsageSection("Claude and GPT models", listOf(UsageQuotaItem("5h limit", 100, "100% left")))
+        )
+
+        val geminiOnly = ComposerBridgeProtocol.filterRelevantUsageSections(sections, "Gemini 4 Neon High")
+        assertEquals(1, geminiOnly.size)
+        assertEquals("Gemini Models", geminiOnly[0].title)
+
+        val orchestratorOnly = ComposerBridgeProtocol.filterRelevantUsageSections(sections, "Orchestrator Gemini 4 Neon Extra High")
+        assertEquals(1, orchestratorOnly.size)
+        assertEquals("Gemini Models", orchestratorOnly[0].title)
+
+        val claudeOnly = ComposerBridgeProtocol.filterRelevantUsageSections(sections, "Claude Sonnet 5.5 Medium")
+        assertEquals(1, claudeOnly.size)
+        assertEquals("Claude and GPT models", claudeOnly[0].title)
+
+        val gptOnly = ComposerBridgeProtocol.filterRelevantUsageSections(sections, "GPT-OSS 120B (Medium)")
+        assertEquals(1, gptOnly.size)
+        assertEquals("Claude and GPT models", gptOnly[0].title)
+
+        val unknownFallback = ComposerBridgeProtocol.filterRelevantUsageSections(sections, "Some Future Model")
+        assertEquals(2, unknownFallback.size)
     }
 
     @Test

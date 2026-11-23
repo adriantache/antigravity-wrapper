@@ -26,6 +26,7 @@ class AntigravityWebBridge(
     private val onModelSubOptionsLoaded: (parentName: String, parentFullText: String, options: List<ModelOption>) -> Unit = { _, _, _ -> },
     private val onModelSelectDone: () -> Unit = {},
     private val onPermissionsLoaded: (List<PermissionOption>) -> Unit,
+    private val onUsageLoaded: (List<UsageSection>) -> Unit = {},
     private val onScrollStateChanged: (Boolean) -> Unit,
     private val onSendResult: (ok: Boolean, error: String?) -> Unit,
     private val onAttachResult: (ok: Boolean, fileNames: List<String>, error: String?) -> Unit = { _, _, _ -> },
@@ -116,6 +117,10 @@ class AntigravityWebBridge(
                 postToMain { onPermissionsLoaded(event.options) }
             }
 
+            is BridgeEvent.UsageLoaded -> {
+                postToMain { onUsageLoaded(event.sections) }
+            }
+
             is BridgeEvent.ScrollStateChanged -> {
                 if (composerFrameKey == null || composerFrameKey == frameKey || !isMainFrame) {
                     postToMain { onScrollStateChanged(event.canScrollUp) }
@@ -174,6 +179,10 @@ class AntigravityWebBridge(
 
     fun selectModel(option: ModelOption) {
         postToComposerFrame(ComposerBridgeProtocol.encodeSelectModel(option.fullText, option.name))
+    }
+
+    fun requestUsage(): Boolean {
+        return postToComposerFrame(ComposerBridgeProtocol.encodeSimpleCommand("getUsage"))
     }
 
     fun openUsage() {

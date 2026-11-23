@@ -1069,6 +1069,141 @@ object AntigravityBridgeScript {
     }
   }
 
+  function parseUsageText(rawText) {
+    var lines = (rawText || '').split('\n').map(function(s) { return s.trim(); }).filter(Boolean);
+    var sections = [];
+    var currentSection = null;
+    var currentItem = null;
+
+    function ensureSection(defaultTitle) {
+      if (!currentSection) {
+        currentSection = { title: defaultTitle || 'Usage', items: [] };
+        sections.push(currentSection);
+      }
+      return currentSection;
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (/^(usage|back|close|view usage)$/i.test(line)) continue;
+
+      // Pure percentage line (e.g. "91% left", "100% left")
+      var pctOnly = line.match(/^(\d{1,3})%\s*(left|remaining|used)?$/i);
+      if (pctOnly) {
+        if (currentItem) {
+          currentItem.percentLeft = parseInt(pctOnly[1], 10);
+          currentItem.percentText = line;
+        }
+        continue;
+      }
+
+      // Reset timer line (e.g. "Resets in 6d 21h", "Resets in 2h 24m")
+      if (/^resets?\b/i.test(line)) {
+        if (currentItem) {
+          currentItem.resetText = line;
+        }
+        continue;
+      }
+
+      // Limit / quota row (e.g. "Weekly limit", "5h limit", or "Weekly limit 91% left")
+      var isLimitRow = /\blimit\b/i.test(line) ||
+        /^\d+\s*[hdwm]\b/i.test(line) ||
+        /^(weekly|daily|hourly|monthly|session|credits?)\b/i.test(line);
+      if (isLimitRow) {
+        var inlinePct = line.match(/(\d{1,3})%\s*(left|remaining|used)?/i);
+        var cleanLabel = inlinePct ? line.replace(inlinePct[0], '').trim() : line;
+        var sec = ensureSection('Usage');
+        currentItem = {
+          label: cleanLabel || line,
+          percentLeft: inlinePct ? parseInt(inlinePct[1], 10) : -1,
+          percentText: inlinePct ? inlinePct[0].trim() : '',
+          resetText: ''
+        };
+        sec.items.push(currentItem);
+        continue;
+      }
+
+      // Section heading (e.g. "Gemini Models", "Claude and GPT models")
+      currentSection = { title: line, items: [] };
+      sections.push(currentSection);
+      currentItem = null;
+    }
+
+    return sections.filter(function(s) { return s.items.length > 0; });
+  }
+
+  async function scrapeUsage() {
+    var trigger = findModelTrigger();
+    if (!trigger) {
+      postToNative({ type: 'usageLoaded', sections: [] });
+      return;
+    }
+
+    var beforeSet = snapshotBodyChildren();
+    var body = document.body;
+    if (body) body.classList.add('agy-scraping-menu');
+
+    try {
+      await openTriggerOverlay(trigger);
+      var found = await waitForOverlayItems(800, beforeSet);
+      var sections = [];
+      if (found) {
+        var usageItem = found.items.find(function(item) {
+          var txt = (item.innerText || item.textContent || '').trim().replace(/\s+/g, ' ');
+          return /^view usage$/i.test(txt) || /\bview usage\b/i.test(txt);
+        });
+        if (usageItem) {
+          try { usageItem.click(); } catch (e) { triggerElementClick(usageItem); }
+
+          // Wait for Usage sub-view to render percentages/limits
+          var deadline = Date.now() + 1000;
+          var usageText = '';
+          while (Date.now() < deadline) {
+            await sleep(35);
+            var portals = findNewBodyPortals(beforeSet);
+            portals.forEach(function(p) { p.setAttribute('data-agy-scraped-portal', 'true'); });
+            var candidates = portals.slice();
+            if (found.container && document.contains(found.container)) {
+              candidates.push(found.container);
+            }
+            for (var c = 0; c < candidates.length; c++) {
+              var txt = (candidates[c].innerText || '').trim();
+              if (/\d{1,3}%\s*(left|remaining|used)?/i.test(txt) && !/\bview usage\b/i.test(txt)) {
+                usageText = txt;
+                break;
+              }
+            }
+            if (usageText) {
+              await sleep(40);
+              // Re-read once settled in case second section finished rendering
+              for (var r = 0; r < candidates.length; r++) {
+                var settled = (candidates[r].innerText || '').trim();
+                if (settled.length >= usageText.length && /\d{1,3}%/.test(settled)) {
+                  usageText = settled;
+                }
+              }
+              break;
+            }
+          }
+
+          if (usageText) {
+            sections = parseUsageText(usageText);
+          }
+        }
+        await closeOpenOverlay(trigger, found, beforeSet);
+      }
+      if (document.activeElement && typeof document.activeElement.blur === 'function') {
+        try { document.activeElement.blur(); } catch (e) {}
+      }
+      postToNative({ type: 'usageLoaded', sections: sections });
+    } finally {
+      findNewBodyPortals(beforeSet).forEach(function(p) {
+        p.removeAttribute('data-agy-scraped-portal');
+      });
+      if (body) body.classList.remove('agy-scraping-menu');
+    }
+  }
+
   async function openUsage() {
     var trigger = findModelTrigger();
     if (!trigger) return;
@@ -1373,6 +1508,10 @@ object AntigravityBridgeScript {
 
       case 'selectModel':
         selectModel(cmd.fullText, cmd.name, cmd.subFullText, cmd.subName);
+        break;
+
+      case 'getUsage':
+        scrapeUsage();
         break;
 
       case 'openUsage':

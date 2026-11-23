@@ -2,6 +2,7 @@ package com.adriantache.antigravitywrapper.ui.components
 
 import android.view.InputDevice
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Tune
@@ -57,6 +59,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -70,9 +74,12 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.adriantache.antigravitywrapper.bridge.ComposerBridgeProtocol
 import com.adriantache.antigravitywrapper.bridge.ComposerState
 import com.adriantache.antigravitywrapper.bridge.ModelOption
 import com.adriantache.antigravitywrapper.bridge.PermissionOption
+import com.adriantache.antigravitywrapper.bridge.UsageQuotaItem
+import com.adriantache.antigravitywrapper.bridge.UsageSection
 
 private val ComposerBackdrop = Color(0xFF101010)
 private val ComposerCardBg = Color(0xFF1A1A1D)
@@ -122,10 +129,12 @@ fun NativeComposerBar(
     isSending: Boolean,
     showVoiceButton: Boolean,
     isFloatingOverlay: Boolean = false,
+    isUsageOpen: Boolean = false,
     focusRequester: FocusRequester? = null,
     onSend: (fromHardwareKeyboard: Boolean) -> Unit,
     onStop: () -> Unit,
     onOpenModelPicker: () -> Unit,
+    onOpenUsage: () -> Unit = {},
     onOpenPermissionsPicker: () -> Unit,
     onAttachClick: () -> Unit,
     onClearAttachments: () -> Unit = {},
@@ -182,6 +191,33 @@ fun NativeComposerBar(
                                     label = composerState.currentModel,
                                     onClick = onOpenModelPicker
                                 )
+
+                                // Direct 1-tap Usage toggle button next to the model selector
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (isUsageOpen) {
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
+                                    } else {
+                                        ComposerChipBg
+                                    },
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .clip(CircleShape)
+                                        .clickable(onClick = onOpenUsage)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.BarChart,
+                                            contentDescription = "View Usage",
+                                            tint = if (isUsageOpen) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                Color.White.copy(alpha = 0.85f)
+                                            },
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
 
                             if (composerState.currentPermissions.isNotBlank()) {
@@ -785,6 +821,276 @@ fun PermissionsPickerBottomSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Compact floating Usage card rendered directly above NativeComposerBar inside the main layout
+ * (not a ModalBottomSheet / Dialog window) so opening it never steals focus or dismisses the
+ * soft or external keyboard.
+ */
+@Composable
+fun UsageOverlayCard(
+    modifier: Modifier = Modifier,
+    sections: List<UsageSection>,
+    currentModel: String,
+    isLoading: Boolean,
+    showAllSections: Boolean,
+    onToggleShowAll: () -> Unit,
+    onRefresh: () -> Unit,
+    onOpenWebUsage: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val displayedSections = if (showAllSections) {
+        sections
+    } else {
+        ComposerBridgeProtocol.filterRelevantUsageSections(sections, currentModel)
+    }
+    val hasMultipleSections = sections.size > 1
+    val headerTitle = when {
+        !showAllSections && displayedSections.size == 1 -> displayedSections[0].title
+        else -> "Usage"
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = ComposerCardBg,
+        border = BorderStroke(1.dp, ComposerBorder),
+        shadowElevation = 10.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // Header row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.BarChart,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(
+                    text = headerTitle,
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+
+                if (hasMultipleSections) {
+                    Surface(
+                        shape = CircleShape,
+                        color = ComposerChipBg,
+                        modifier = Modifier
+                            .height(26.dp)
+                            .clip(CircleShape)
+                            .clickable(onClick = onToggleShowAll)
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (showAllSections) "Current" else "All",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable(enabled = !isLoading, onClick = onRefresh),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Refresh usage",
+                        tint = ComposerMutedText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close usage",
+                        tint = ComposerMutedText,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+                displayedSections.isEmpty() -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "Couldn't read usage data",
+                            color = ComposerMutedText,
+                            fontSize = 12.sp
+                        )
+                        Surface(
+                            shape = CircleShape,
+                            color = ComposerChipBg,
+                            modifier = Modifier
+                                .height(28.dp)
+                                .clip(CircleShape)
+                                .clickable(onClick = onOpenWebUsage)
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Open web view",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        displayedSections.forEachIndexed { secIdx, section ->
+                            if (secIdx > 0) {
+                                HorizontalDivider(color = ComposerBorder.copy(alpha = 0.7f))
+                            }
+                            if (displayedSections.size > 1) {
+                                Text(
+                                    text = section.title,
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            section.items.forEach { item ->
+                                UsageQuotaRow(item = item)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageQuotaRow(item: UsageQuotaItem) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.label,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (item.resetText.isNotBlank()) {
+                Text(
+                    text = item.resetText,
+                    color = ComposerMutedText,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        if (item.percentText.isNotBlank()) {
+            Text(
+                text = item.percentText,
+                color = Color.White.copy(alpha = 0.9f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        if (item.percentLeft in 0..100) {
+            UsageRingGauge(percentLeft = item.percentLeft)
+        }
+    }
+}
+
+@Composable
+private fun UsageRingGauge(percentLeft: Int) {
+    val gaugeColor = when {
+        percentLeft >= 40 -> Color(0xFF4CAF50)
+        percentLeft >= 15 -> Color(0xFFFFB300)
+        else -> Color(0xFFE55353)
+    }
+    val trackColor = Color(0xFF2E3238)
+
+    Canvas(modifier = Modifier.size(18.dp)) {
+        val strokeWidth = 2.4.dp.toPx()
+        val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        drawArc(
+            color = trackColor,
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            style = stroke
+        )
+        val sweep = (percentLeft / 100f) * 360f
+        if (sweep > 0f) {
+            drawArc(
+                color = gaugeColor,
+                startAngle = -90f,
+                sweepAngle = sweep,
+                useCenter = false,
+                style = stroke
+            )
         }
     }
 }

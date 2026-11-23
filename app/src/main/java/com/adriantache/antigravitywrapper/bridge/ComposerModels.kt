@@ -29,6 +29,18 @@ data class PermissionOption(
     val isSelected: Boolean = false
 )
 
+data class UsageQuotaItem(
+    val label: String,
+    val percentLeft: Int = -1,
+    val percentText: String = "",
+    val resetText: String = ""
+)
+
+data class UsageSection(
+    val title: String,
+    val items: List<UsageQuotaItem>
+)
+
 data class BridgeConfig(
     val nativeComposerEnabled: Boolean,
     val showVoiceButton: Boolean,
@@ -57,6 +69,7 @@ sealed class BridgeEvent {
     ) : BridgeEvent()
     data class ModelSelectResult(val done: Boolean) : BridgeEvent()
     data class PermissionsLoaded(val options: List<PermissionOption>) : BridgeEvent()
+    data class UsageLoaded(val sections: List<UsageSection>) : BridgeEvent()
     data class ScrollStateChanged(val canScrollUp: Boolean) : BridgeEvent()
     data class SendResult(val ok: Boolean, val error: String? = null) : BridgeEvent()
     data class AttachResult(
@@ -127,6 +140,37 @@ object ComposerBridgeProtocol {
                         }
                     }
                     BridgeEvent.PermissionsLoaded(options)
+                }
+
+                "usageLoaded" -> {
+                    val secArr = json.optJSONArray("sections") ?: JSONArray()
+                    val sections = buildList {
+                        for (i in 0 until secArr.length()) {
+                            val sec = secArr.optJSONObject(i) ?: continue
+                            val title = normalizeSingleLine(sec.optString("title", ""))
+                            val itemsArr = sec.optJSONArray("items") ?: JSONArray()
+                            val items = buildList {
+                                for (j in 0 until itemsArr.length()) {
+                                    val it = itemsArr.optJSONObject(j) ?: continue
+                                    val label = normalizeSingleLine(it.optString("label", ""))
+                                    if (label.isNotEmpty()) {
+                                        add(
+                                            UsageQuotaItem(
+                                                label = label,
+                                                percentLeft = it.optInt("percentLeft", -1),
+                                                percentText = normalizeSingleLine(it.optString("percentText", "")),
+                                                resetText = normalizeSingleLine(it.optString("resetText", ""))
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                            if (title.isNotEmpty() || items.isNotEmpty()) {
+                                add(UsageSection(title = title.ifEmpty { "Usage" }, items = items))
+                            }
+                        }
+                    }
+                    BridgeEvent.UsageLoaded(sections)
                 }
 
                 "scrollState" -> BridgeEvent.ScrollStateChanged(
@@ -264,4 +308,42 @@ object ComposerBridgeProtocol {
         put("type", "attachBatchCommit")
         put("batchId", batchId)
     }.toString()
+
+    /**
+     * Filters usage sections down to the quota group relevant to the currently selected model
+     * (e.g. "Gemini Models" vs "Claude and GPT models"). Falls back to all sections if no
+     * specific match is found.
+     */
+    fun filterRelevantUsageSections(
+        sections: List<UsageSection>,
+        currentModel: String
+    ): List<UsageSection> {
+        if (sections.size <= 1 || currentModel.isBlank()) return sections
+        val modelLower = currentModel.lowercase()
+
+        val isClaudeOrGpt = listOf("claude", "opus", "sonnet", "haiku", "gpt", "openai")
+            .any { modelLower.contains(it) }
+        val isGemini = listOf("gemini", "orchestrator", "neon", "argon", "hydrogen", "carbon", "flash")
+            .any { modelLower.contains(it) }
+
+        val matched = when {
+            isClaudeOrGpt -> sections.filter { sec ->
+                val t = sec.title.lowercase()
+                t.contains("claude") || t.contains("gpt") || t.contains("openai")
+            }
+            isGemini -> sections.filter { sec ->
+                sec.title.lowercase().contains("gemini")
+            }
+            else -> {
+                val tokens = modelLower.split(Regex("[^a-z0-9]+"))
+                    .filter { it.length >= 3 && it != "model" && it != "models" }
+                sections.filter { sec ->
+                    val t = sec.title.lowercase()
+                    tokens.any { t.contains(it) }
+                }
+            }
+        }
+
+        return matched.ifEmpty { sections }
+    }
 }
