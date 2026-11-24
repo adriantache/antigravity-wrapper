@@ -246,4 +246,38 @@ class UrlPolicyTest {
             UrlPolicy.isTrustedBridgeOrigin(null, defaultServer)
         )
     }
+
+    @Test
+    fun shouldAllowBackNavigation_blocksAuthBounceFromAntigravityOnly() {
+        assertFalse(
+            UrlPolicy.shouldAllowBackNavigation(
+                currentUrl = "https://antigravity.google.com/remote?path=%2Fview%2Fremote-control",
+                previousUrl = "https://accounts.google.com/v3/signin/identifier"
+            )
+        )
+        assertFalse(
+            UrlPolicy.shouldAllowBackNavigation(
+                currentUrl = "https://antigravity.google/remote",
+                previousUrl = "https://consent.google.com/ml"
+            )
+        )
+        assertTrue(
+            UrlPolicy.shouldAllowBackNavigation(
+                currentUrl = "https://accounts.google.com/v3/signin/challenge",
+                previousUrl = "https://accounts.google.com/v3/signin/identifier"
+            )
+        )
+        assertTrue(
+            UrlPolicy.shouldAllowBackNavigation(
+                currentUrl = "https://antigravity.google.com/remote?path=%2Fconversation%2F123",
+                previousUrl = "https://antigravity.google.com/remote?path=%2Fview%2Fremote-control"
+            )
+        )
+        assertTrue(
+            UrlPolicy.shouldAllowBackNavigation(
+                currentUrl = "http://192.168.1.50:8080/chat/1",
+                previousUrl = "http://192.168.1.50:8080/"
+            )
+        )
+    }
 }

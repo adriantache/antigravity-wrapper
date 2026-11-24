@@ -80,6 +80,12 @@ sealed class BridgeEvent {
         val error: String? = null
     ) : BridgeEvent()
     data object RequestNativeFocus : BridgeEvent()
+    data class BackNavigationResult(
+        val requestId: String,
+        val handled: Boolean,
+        val onConversationList: Boolean = false,
+        val action: String = ""
+    ) : BridgeEvent()
     data class WebNotification(val title: String, val body: String, val url: String) : BridgeEvent()
 }
 
@@ -202,6 +208,13 @@ object ComposerBridgeProtocol {
 
                 "requestNativeFocus" -> BridgeEvent.RequestNativeFocus
 
+                "navigateBackResult" -> BridgeEvent.BackNavigationResult(
+                    requestId = json.optString("requestId", ""),
+                    handled = json.optBoolean("handled", false),
+                    onConversationList = json.optBoolean("onConversationList", false),
+                    action = json.optString("action", "")
+                )
+
                 "notification" -> BridgeEvent.WebNotification(
                     title = json.optString("title", "Antigravity"),
                     body = json.optString("body", ""),
@@ -276,6 +289,11 @@ object ComposerBridgeProtocol {
 
     fun encodeSimpleCommand(type: String): String = JSONObject().apply {
         put("type", type)
+    }.toString()
+
+    fun encodeNavigateBack(requestId: String): String = JSONObject().apply {
+        put("type", "navigateBack")
+        put("requestId", requestId)
     }.toString()
 
     fun encodeAttachBatchStart(batchId: String, fileCount: Int): String = JSONObject().apply {

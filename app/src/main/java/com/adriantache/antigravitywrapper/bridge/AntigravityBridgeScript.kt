@@ -1655,6 +1655,239 @@ object AntigravityBridgeScript {
     active.dispatchEvent(new KeyboardEvent('keyup', opts));
   }
 
+  function isElementVisible(el) {
+    if (!el || !document.contains(el)) return false;
+    var cur = el;
+    while (cur && cur !== document.documentElement) {
+      if (cur.hidden || cur.getAttribute('aria-hidden') === 'true') return false;
+      var cs = window.getComputedStyle(cur);
+      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) {
+        return false;
+      }
+      cur = cur.parentElement;
+    }
+    var r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 &&
+      r.right > 0 && r.left < window.innerWidth &&
+      r.bottom > 0 && r.top < window.innerHeight;
+  }
+
+  function isConversationListVisible() {
+    var sidebar = document.querySelector(
+      '[data-testid="conversation-list-sidebar"], [data-sidebar-scroll-container="true"]'
+    );
+    if (!sidebar || !isElementVisible(sidebar)) return false;
+    var r = sidebar.getBoundingClientRect();
+    if (!(r.width > 60 && r.height > 100 && r.right > 20 && r.left < window.innerWidth - 20)) {
+      return false;
+    }
+    // Verify the sidebar is not obscured underneath a full-screen conversation pane
+    var cx = Math.max(1, Math.min(window.innerWidth - 1, r.left + r.width / 2));
+    var cy = Math.max(1, Math.min(window.innerHeight - 1, r.top + Math.min(r.height / 2, 160)));
+    var topEl = document.elementFromPoint(cx, cy);
+    if (topEl && !sidebar.contains(topEl) && !topEl.contains(sidebar)) {
+      return false;
+    }
+    return true;
+  }
+
+  function clickElementSafely(el) {
+    if (!el) return false;
+    try {
+      el.click();
+      return true;
+    } catch (e) {
+      try {
+        triggerElementClick(el);
+        return true;
+      } catch (e2) {
+        return false;
+      }
+    }
+  }
+
+  function dismissOpenWebOverlay() {
+    var overlays = Array.prototype.slice.call(
+      document.querySelectorAll('[role="dialog"], [aria-modal="true"], [role="menu"], [role="listbox"], .agy-overlay')
+    );
+    var visibleOverlay = null;
+    for (var i = overlays.length - 1; i >= 0; i--) {
+      var ov = overlays[i];
+      if (ov.getAttribute('data-agy-scraped-portal') === 'true') continue;
+      if (!isElementVisible(ov)) continue;
+      var r = ov.getBoundingClientRect();
+      if (r.width >= 40 && r.height >= 40) {
+        visibleOverlay = ov;
+        break;
+      }
+    }
+    if (!visibleOverlay) return false;
+
+    var opts = {
+      key: 'Escape',
+      code: 'Escape',
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      view: window
+    };
+    try { visibleOverlay.dispatchEvent(new KeyboardEvent('keydown', opts)); } catch (e) {}
+    try { document.dispatchEvent(new KeyboardEvent('keydown', opts)); } catch (e) {}
+
+    if (isElementVisible(visibleOverlay)) {
+      var closeBtn = visibleOverlay.querySelector(
+        'button[aria-label*="Close" i], button[aria-label*="Dismiss" i], button[title*="Close" i], button[aria-label*="Back" i]'
+      );
+      if (closeBtn && isElementVisible(closeBtn)) {
+        clickElementSafely(closeBtn);
+      }
+    }
+    scheduleNavigationCheck();
+    return true;
+  }
+
+  function findConversationBackButton() {
+    var composerRoot = findComposerRoot();
+    var headerMaxTop = 112;
+    var headerMaxBottom = 136;
+    var leftMaxX = Math.min(160, Math.max(96, window.innerWidth * 0.42));
+    var excludedPattern = /\b(new|add|create|delete|remove|trash|send|stop|cancel|settings?|refresh|reload|share|review|copy|more|search|filter|sort|attach|upload|voice|record|mic|model|permission|usage|edit|rename|archive|pin|star|thumbs|like|dislike|expand|maximize)\b/i;
+
+    var candidates = Array.prototype.slice.call(
+      document.querySelectorAll('button, a[href], [role="button"]')
+    );
+
+    var tier1 = []; // Explicit "Back" / "Conversations" / "Projects" / "Inbox"
+    var tier2 = []; // Top-left "Sidebar" / "Drawer" / "Navigation" / "Menu" toggle
+    var tier3 = []; // Top-left button containing a left-arrow / chevron-left / panel-left SVG
+    var tier4 = []; // Leftmost unlabeled icon button in the strict top-left corner
+
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      if (composerRoot && composerRoot.contains(el)) continue;
+      if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+      if (!isElementVisible(el)) continue;
+
+      var cs = window.getComputedStyle(el);
+      if (cs.pointerEvents === 'none') continue;
+
+      var rect = el.getBoundingClientRect();
+      if (rect.width < 16 || rect.height < 16) continue;
+      if (rect.top < -4 || rect.top > headerMaxTop || rect.bottom > headerMaxBottom) continue;
+      if (rect.left < -4 || rect.left > leftMaxX) continue;
+
+      var aria = (el.getAttribute('aria-label') || '').trim();
+      var title = (el.getAttribute('title') || '').trim();
+      var testId = (el.getAttribute('data-testid') || '').trim();
+      var tooltipId = (el.getAttribute('data-tooltip-id') || '').trim();
+      var tooltipContent = (el.getAttribute('data-tooltip-content') || '').trim();
+      var text = (el.textContent || '').trim().replace(/\s+/g, ' ');
+      var combined = (aria + ' ' + title + ' ' + testId + ' ' + tooltipId + ' ' + tooltipContent + ' ' + text).trim();
+      var hasPopup = !!el.getAttribute('aria-haspopup');
+
+      if (excludedPattern.test(combined) && !/\bback\b/i.test(combined)) {
+        continue;
+      }
+
+      var entry = { el: el, left: rect.left, top: rect.top };
+
+      // Tier 1: Explicit Back / Return to conversations / Projects button
+      if (/\bback\b/i.test(combined) ||
+          (!hasPopup && (
+            /\b(all\s+)?conversations?\b/i.test(combined) ||
+            /\b(all\s+)?projects?\b/i.test(combined) ||
+            /\binbox\b/i.test(combined)
+          ))) {
+        tier1.push(entry);
+        continue;
+      }
+
+      if (hasPopup) continue;
+
+      // Tier 2: Top-left sidebar / drawer / menu button (opens conversation list when hidden)
+      if (rect.left <= 96 && /\b(sidebar|drawer|navigation|nav|menu)\b/i.test(combined)) {
+        tier2.push(entry);
+        continue;
+      }
+
+      // Tier 3 & 4: Top-left icon button with SVG clues
+      if (rect.left <= 72 && rect.top <= 88 && rect.height <= 64) {
+        var svg = el.querySelector('svg');
+        if (svg) {
+          var svgCls = (svg.getAttribute('class') || '') + ' ' +
+            (svg.getAttribute('data-testid') || '') + ' ' +
+            (svg.getAttribute('aria-label') || '') + ' ' +
+            (svg.getAttribute('data-icon') || '');
+          if (rect.width <= Math.min(220, window.innerWidth * 0.6) &&
+              /(arrow[-_]?left|chevron[-_]?left|panel[-_]?left|sidebar|back|menu|hamburger)/i.test(svgCls)) {
+            tier3.push(entry);
+            continue;
+          }
+          if (composerRoot && !combined && rect.left <= 48 && rect.top <= 76 && rect.width <= 60) {
+            tier4.push(entry);
+          }
+        }
+      }
+    }
+
+    function pickTopLeft(list) {
+      if (!list.length) return null;
+      list.sort(function(a, b) {
+        if (Math.abs(a.left - b.left) > 8) return a.left - b.left;
+        return a.top - b.top;
+      });
+      return list[0].el;
+    }
+
+    return pickTopLeft(tier1) || pickTopLeft(tier2) || pickTopLeft(tier3) || pickTopLeft(tier4);
+  }
+
+  function handleNavigateBack(requestId) {
+    if (dismissOpenWebOverlay()) {
+      postToNative({
+        type: 'navigateBackResult',
+        requestId: requestId || '',
+        handled: true,
+        onConversationList: false,
+        action: 'dismissOverlay'
+      });
+      return;
+    }
+
+    if (isConversationListVisible()) {
+      postToNative({
+        type: 'navigateBackResult',
+        requestId: requestId || '',
+        handled: false,
+        onConversationList: true,
+        action: 'onList'
+      });
+      return;
+    }
+
+    var backBtn = findConversationBackButton();
+    if (backBtn && clickElementSafely(backBtn)) {
+      scheduleNavigationCheck();
+      postToNative({
+        type: 'navigateBackResult',
+        requestId: requestId || '',
+        handled: true,
+        onConversationList: false,
+        action: 'clickedBack'
+      });
+      return;
+    }
+
+    postToNative({
+      type: 'navigateBackResult',
+      requestId: requestId || '',
+      handled: false,
+      onConversationList: false,
+      action: 'none'
+    });
+  }
+
   // 9. Handle commands from Kotlin
   function handleNativeMessage(raw) {
     var cmd;
@@ -1763,6 +1996,10 @@ object AntigravityBridgeScript {
       case 'dispatchEscape':
         dispatchEscape();
         scheduleNavigationCheck();
+        break;
+
+      case 'navigateBack':
+        handleNavigateBack(cmd.requestId);
         break;
 
       case 'refreshState':

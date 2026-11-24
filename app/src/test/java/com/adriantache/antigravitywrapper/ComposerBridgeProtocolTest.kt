@@ -172,6 +172,22 @@ class ComposerBridgeProtocolTest {
             ComposerBridgeProtocol.parseEvent("""{"type":"requestNativeFocus"}""")
         )
 
+        val backHandled = ComposerBridgeProtocol.parseEvent(
+            """{"type":"navigateBackResult","requestId":"back_1","handled":true,"onConversationList":false,"action":"clickedBack"}"""
+        ) as BridgeEvent.BackNavigationResult
+        assertEquals("back_1", backHandled.requestId)
+        assertTrue(backHandled.handled)
+        assertFalse(backHandled.onConversationList)
+        assertEquals("clickedBack", backHandled.action)
+
+        val backOnList = ComposerBridgeProtocol.parseEvent(
+            """{"type":"navigateBackResult","requestId":"back_2","handled":false,"onConversationList":true,"action":"onList"}"""
+        ) as BridgeEvent.BackNavigationResult
+        assertEquals("back_2", backOnList.requestId)
+        assertFalse(backOnList.handled)
+        assertTrue(backOnList.onConversationList)
+        assertEquals("onList", backOnList.action)
+
         val usage = ComposerBridgeProtocol.parseEvent(
             """
             {
@@ -292,6 +308,10 @@ class ComposerBridgeProtocolTest {
         val batchCommit = JSONObject(ComposerBridgeProtocol.encodeAttachBatchCommit("b_1"))
         assertEquals("attachBatchCommit", batchCommit.getString("type"))
         assertEquals("b_1", batchCommit.getString("batchId"))
+
+        val navBack = JSONObject(ComposerBridgeProtocol.encodeNavigateBack("back_42"))
+        assertEquals("navigateBack", navBack.getString("type"))
+        assertEquals("back_42", navBack.getString("requestId"))
     }
 
     @Test

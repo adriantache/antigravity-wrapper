@@ -97,6 +97,7 @@ import com.adriantache.antigravitywrapper.ui.components.UsageOverlayCard
 import com.adriantache.antigravitywrapper.ui.components.dispatchEscapeEvent
 import com.adriantache.antigravitywrapper.ui.theme.AntigravityWrapperTheme
 import com.adriantache.antigravitywrapper.util.NotificationHelper
+import com.adriantache.antigravitywrapper.util.UrlPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -517,8 +518,11 @@ fun AntigravityApp(
     // Settings dialog state
     var showSettingsDialog by remember { mutableStateOf(false) }
 
-    // Double-back tracker
+    // Double-back & stuck-history trackers
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
+    var lastGoBackIndex by remember { mutableIntStateOf(-1) }
+    var lastGoBackUrl by remember { mutableStateOf("") }
+    var lastGoBackTime by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(isKeepScreenOn) {
         activity.applyKeepScreenOn(isKeepScreenOn)
@@ -554,30 +558,7 @@ fun AntigravityApp(
         }
     }
 
-    // Back gesture interception
-    BackHandler(enabled = true) {
-        if (showUsageCard) {
-            showUsageCard = false
-            return@BackHandler
-        }
-        if (showModelSheet) {
-            showModelSheet = false
-            return@BackHandler
-        }
-        if (showPermissionsSheet) {
-            showPermissionsSheet = false
-            return@BackHandler
-        }
-        if (showSettingsDialog) {
-            showSettingsDialog = false
-            return@BackHandler
-        }
-
-        if (webViewInstance?.canGoBack() == true) {
-            webViewInstance?.goBack()
-            return@BackHandler
-        }
-
+    fun handleRootBack() {
         if (preferencesManager.isDoubleBackExitEnabled) {
             val currentTime = System.currentTimeMillis()
             if (currentTime - lastBackPressTime < 2000L) {
@@ -597,6 +578,72 @@ fun AntigravityApp(
             }
         } else {
             activity.finish()
+        }
+    }
+
+    // Back gesture interception
+    BackHandler(enabled = true) {
+        if (showUsageCard) {
+            showUsageCard = false
+            return@BackHandler
+        }
+        if (showModelSheet) {
+            if (modelSubOptions.isNotEmpty()) {
+                modelSubParentName = null
+                modelSubParentFullText = null
+                modelSubOptions = emptyList()
+            } else {
+                showModelSheet = false
+            }
+            return@BackHandler
+        }
+        if (showPermissionsSheet) {
+            showPermissionsSheet = false
+            return@BackHandler
+        }
+        if (showSettingsDialog) {
+            showSettingsDialog = false
+            return@BackHandler
+        }
+
+        // First ask the Antigravity SPA frame to handle in-app back navigation
+        // (dismiss open web overlays, or click the mobile conversation Back button to return to the list).
+        webBridge.navigateBack { handled, onConversationList ->
+            if (handled) {
+                lastGoBackIndex = -1
+                lastGoBackUrl = ""
+                focusManager.clearFocus()
+                return@navigateBack
+            }
+
+            // Already on the conversation list (or tablet split-view with sidebar visible):
+            // avoid bouncing into stale WebView history or Google auth redirects.
+            if (onConversationList) {
+                handleRootBack()
+                return@navigateBack
+            }
+
+            val wv = webViewInstance
+            if (wv != null && wv.canGoBack()) {
+                val history = wv.copyBackForwardList()
+                val idx = history.currentIndex
+                val currUrl = if (idx >= 0) history.getItemAtIndex(idx)?.url.orEmpty() else ""
+                val prevUrl = if (idx > 0) history.getItemAtIndex(idx - 1)?.url.orEmpty() else ""
+                val now = System.currentTimeMillis()
+                val isStuckHistoryTrap = idx == lastGoBackIndex &&
+                    currUrl == lastGoBackUrl &&
+                    (now - lastGoBackTime) < 2000L
+
+                if (idx > 0 && UrlPolicy.shouldAllowBackNavigation(currUrl, prevUrl) && !isStuckHistoryTrap) {
+                    lastGoBackIndex = idx
+                    lastGoBackUrl = currUrl
+                    lastGoBackTime = now
+                    wv.goBack()
+                    return@navigateBack
+                }
+            }
+
+            handleRootBack()
         }
     }
 
@@ -675,6 +722,8 @@ fun AntigravityApp(
                         hasConnectionError = false
                         attachedFileNames = emptyList()
                         isAttachingFiles = false
+                        lastGoBackIndex = -1
+                        lastGoBackUrl = ""
                     },
                     onPageFinished = {
                         isPageLoading = false

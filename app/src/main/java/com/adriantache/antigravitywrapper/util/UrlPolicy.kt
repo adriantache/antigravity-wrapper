@@ -72,6 +72,18 @@ object UrlPolicy {
     }
 
     /**
+     * Prevents WebView.goBack() from bouncing the user back into Google sign-in / OAuth
+     * redirect pages once they have already landed inside Antigravity.
+     */
+    fun shouldAllowBackNavigation(currentUrl: String, previousUrl: String): Boolean {
+        val currEndpoint = extractEndpoint(currentUrl) ?: return true
+        val prevEndpoint = extractEndpoint(previousUrl) ?: return true
+        val currIsAntigravity = isAntigravityHost(currEndpoint.host) || isAntigravityStaticHost(currEndpoint.host)
+        val prevIsAuth = prevEndpoint.host in GOOGLE_AUTH_HOSTS
+        return !(currIsAntigravity && prevIsAuth)
+    }
+
+    /**
      * Checks whether a WebMessage origin (including cross-origin Antigravity iframes) is
      * trusted to communicate with the native composer and notification bridge.
      */

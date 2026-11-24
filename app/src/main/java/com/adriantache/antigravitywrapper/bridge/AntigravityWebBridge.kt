@@ -12,6 +12,7 @@ import androidx.webkit.WebViewFeature
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Manages bidirectional communication between Kotlin/Compose and Antigravity web frames
@@ -34,8 +35,17 @@ class AntigravityWebBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val frameProxies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
+    private val backRequestSeq = AtomicLong(0L)
+    private val pendingBackRequests = LinkedHashMap<String, PendingBackRequest>()
     @Volatile
     private var composerFrameKey: String? = null
+
+    private class PendingBackRequest(
+        val remainingFrames: ArrayDeque<Pair<String, JavaScriptReplyProxy>>,
+        val onResult: (handled: Boolean, onConversationList: Boolean) -> Unit,
+        var timeoutRunnable: Runnable? = null,
+        var completed: Boolean = false
+    )
     @Volatile
     private var currentConfig = BridgeConfig(
         nativeComposerEnabled = true,
@@ -156,6 +166,10 @@ class AntigravityWebBridge(
                 postToMain { onRequestNativeFocus() }
             }
 
+            is BridgeEvent.BackNavigationResult -> {
+                postToMain { handleBackNavigationResult(event) }
+            }
+
             is BridgeEvent.WebNotification -> {
                 NotificationHelper.showNotification(
                     context = context,
@@ -177,6 +191,11 @@ class AntigravityWebBridge(
         composerFrameKey = null
         frameProxies.clear()
         postToMain {
+            pendingBackRequests.values.forEach { req ->
+                req.completed = true
+                req.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+            }
+            pendingBackRequests.clear()
             onComposerStateChanged(ComposerState())
             onScrollStateChanged(false)
         }
@@ -282,6 +301,82 @@ class AntigravityWebBridge(
 
     fun dispatchEscape() {
         broadcast(ComposerBridgeProtocol.encodeSimpleCommand("dispatchEscape"))
+    }
+
+    /**
+     * Asks the active Antigravity SPA frame (and any other attached frames in priority order)
+     * to handle in-app back navigation: dismiss open web dialogs/menus, or click the mobile
+     * conversation Back button to return to the conversation list.
+     */
+    fun navigateBack(onResult: (handled: Boolean, onConversationList: Boolean) -> Unit) {
+        postToMain {
+            val orderedFrames = ArrayDeque<Pair<String, JavaScriptReplyProxy>>()
+            val primaryKey = composerFrameKey
+            if (primaryKey != null) {
+                frameProxies[primaryKey]?.let { orderedFrames.addLast(primaryKey to it) }
+            }
+            frameProxies.entries
+                .filter { it.key != primaryKey && it.key.endsWith("|false") }
+                .forEach { orderedFrames.addLast(it.key to it.value) }
+            frameProxies.entries
+                .filter { it.key != primaryKey && !it.key.endsWith("|false") }
+                .forEach { orderedFrames.addLast(it.key to it.value) }
+
+            if (orderedFrames.isEmpty()) {
+                onResult(false, false)
+                return@postToMain
+            }
+
+            val requestId = "back_${backRequestSeq.incrementAndGet()}"
+            val request = PendingBackRequest(
+                remainingFrames = orderedFrames,
+                onResult = onResult
+            )
+            val timeout = Runnable {
+                completeBackRequest(requestId, handled = false, onConversationList = false)
+            }
+            request.timeoutRunnable = timeout
+            pendingBackRequests[requestId] = request
+            mainHandler.postDelayed(timeout, 300L)
+
+            dispatchNextBackFrame(requestId, request)
+        }
+    }
+
+    private fun dispatchNextBackFrame(requestId: String, request: PendingBackRequest) {
+        if (request.completed) return
+        val payload = ComposerBridgeProtocol.encodeNavigateBack(requestId)
+        while (request.remainingFrames.isNotEmpty()) {
+            val (key, proxy) = request.remainingFrames.removeFirst()
+            if (safePost(proxy, payload)) {
+                return
+            }
+            frameProxies.remove(key, proxy)
+        }
+        completeBackRequest(requestId, handled = false, onConversationList = false)
+    }
+
+    private fun handleBackNavigationResult(event: BridgeEvent.BackNavigationResult) {
+        val request = pendingBackRequests[event.requestId] ?: return
+        if (request.completed) return
+
+        when {
+            event.handled -> completeBackRequest(event.requestId, handled = true, onConversationList = false)
+            event.onConversationList -> completeBackRequest(event.requestId, handled = false, onConversationList = true)
+            else -> dispatchNextBackFrame(event.requestId, request)
+        }
+    }
+
+    private fun completeBackRequest(
+        requestId: String,
+        handled: Boolean,
+        onConversationList: Boolean
+    ) {
+        val request = pendingBackRequests.remove(requestId) ?: return
+        if (request.completed) return
+        request.completed = true
+        request.timeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        request.onResult(handled, onConversationList)
     }
 
     private fun postToComposerFrame(payload: String): Boolean {
