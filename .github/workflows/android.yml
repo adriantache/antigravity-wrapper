@@ -3,6 +3,9 @@ name: Android CI
 on:
   push:
     branches: [ "master", "main" ]
+    tags:
+      - '[0-9]*.[0-9]*.[0-9]*'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
   pull_request:
     branches: [ "master", "main" ]
   release:
@@ -10,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.0.0) to create and publish a GitHub Release'
+        description: 'Release tag (e.g. 1.2.4) to create and publish a GitHub Release'
         required: true
         type: string
       prerelease:
@@ -30,8 +33,21 @@ jobs:
       - name: Checking out branch
         uses: actions/checkout@v7
 
+      - name: Determine Build Mode
+        id: mode
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref }}
+        run: |
+          if [[ "$EVENT_NAME" == "release" || "$EVENT_NAME" == "workflow_dispatch" || "$REF_NAME" == refs/tags/* ]]; then
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Validate Release Secrets
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        if: steps.mode.outputs.is_release == 'true'
         shell: bash
         env:
           KEYSTORE_BASE_64: ${{ secrets.KEYSTORE_BASE_64 }}
@@ -49,21 +65,21 @@ jobs:
       - name: Setup Shared Android Environment
         uses: ./.github/actions/setup-android-env
         with:
-          keystore-b64: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.KEYSTORE_BASE_64 || '' }}
-          keystore-password: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEYSTORE_PASSWORD || '' }}
-          keystore-alias: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEYSTORE_ALIAS || '' }}
-          key-password: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && secrets.RELEASE_KEY_PASSWORD || '' }}
+          keystore-b64: ${{ steps.mode.outputs.is_release == 'true' && secrets.KEYSTORE_BASE_64 || '' }}
+          keystore-password: ${{ steps.mode.outputs.is_release == 'true' && secrets.RELEASE_KEYSTORE_PASSWORD || '' }}
+          keystore-alias: ${{ steps.mode.outputs.is_release == 'true' && secrets.RELEASE_KEYSTORE_ALIAS || '' }}
+          key-password: ${{ steps.mode.outputs.is_release == 'true' && secrets.RELEASE_KEY_PASSWORD || '' }}
 
       - name: Run Tests with Gradle
-        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        if: steps.mode.outputs.is_release != 'true'
         run: ./gradlew test
 
       - name: Run Tests and Build Release APK
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        if: steps.mode.outputs.is_release == 'true'
         run: ./gradlew test assembleRelease
 
       - name: Verify Signed Release APK
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        if: steps.mode.outputs.is_release == 'true'
         shell: bash
         run: |
           ls -la app/build/outputs/apk/release/
@@ -80,6 +96,15 @@ jobs:
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v3
         with:
+          files: app/build/outputs/apk/release/*.apk
+
+      - name: Publish GitHub Release (from tag push)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
           files: app/build/outputs/apk/release/*.apk
 
       - name: Publish GitHub Release (from manual dispatch)
