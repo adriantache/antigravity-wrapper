@@ -46,6 +46,7 @@ data class BridgeConfig(
     val nativeComposerEnabled: Boolean,
     val showVoiceButton: Boolean,
     val isTablet: Boolean,
+    val isDesktopMode: Boolean = false,
     val enhancedWebComposer: Boolean = true,
     val composerSpacerPx: Int = 0
 )
@@ -245,6 +246,7 @@ object ComposerBridgeProtocol {
         put("nativeComposerEnabled", config.nativeComposerEnabled)
         put("showVoiceButton", config.showVoiceButton)
         put("isTablet", config.isTablet)
+        put("isDesktopMode", config.isDesktopMode)
         put("enhancedWebComposer", config.enhancedWebComposer)
         put("composerSpacerPx", config.composerSpacerPx)
     }.toString()

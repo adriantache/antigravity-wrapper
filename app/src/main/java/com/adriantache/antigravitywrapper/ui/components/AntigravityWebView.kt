@@ -107,6 +107,7 @@ fun AntigravityWebView(
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     val currentConfiguredUrl by rememberUpdatedState(url)
+    val latestIsDesktopMode by rememberUpdatedState(isDesktopMode)
 
     // File chooser launcher for file uploads in Antigravity web interface
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -194,6 +195,8 @@ fun AntigravityWebView(
                 }
 
                 val webView = this
+                var baseScale = 0f
+                var isZoomedIn = false
                 addJavascriptInterface(WebNotificationBridge(context), "_AntigravityNotifier")
                 bridge?.attachTo(webView)
                 CookieManager.getInstance().apply {
@@ -202,6 +205,14 @@ fun AntigravityWebView(
                 }
 
                 webViewClient = object : WebViewClient() {
+                    override fun onScaleChanged(view: WebView?, oldScale: Float, newScale: Float) {
+                        super.onScaleChanged(view, oldScale, newScale)
+                        if (baseScale <= 0f || newScale < baseScale) {
+                            baseScale = newScale
+                        }
+                        isZoomedIn = baseScale > 0f && newScale > baseScale * 1.03f
+                    }
+
                     override fun shouldOverrideUrlLoading(
                         view: WebView?,
                         request: WebResourceRequest?
@@ -237,6 +248,8 @@ fun AntigravityWebView(
                     }
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                         super.onPageStarted(view, url, favicon)
+                        baseScale = 0f
+                        isZoomedIn = false
                         bridge?.resetForNavigation()
                         view?.evaluateJavascript(NOTIFICATION_POLYFILL_JS, null)
                         onPageStarted()
@@ -327,7 +340,11 @@ fun AntigravityWebView(
                     }
                 }
 
-                setOnScrollChangeListener { _, _, scrollY, _, _ ->
+                setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
+                    // Prevent root horizontal drift in mobile/tablet mode when not zoomed in
+                    if (!latestIsDesktopMode && !isZoomedIn && scrollX != 0) {
+                        scrollTo(0, scrollY)
+                    }
                     // canScrollUp is false when at the very top (scrollY == 0)
                     onScrollChanged(scrollY > 0)
                 }

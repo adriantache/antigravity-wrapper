@@ -28,6 +28,7 @@ object AntigravityBridgeScript {
     nativeComposerEnabled: true,
     showVoiceButton: false,
     isTablet: false,
+    isDesktopMode: false,
     enhancedWebComposer: true,
     composerSpacerPx: 0
   };
@@ -259,6 +260,7 @@ object AntigravityBridgeScript {
       '  left: 0 !important;' +
       '  bottom: 0 !important;' +
       '  width: 320px !important;' +
+      '  max-width: 100vw !important;' +
       '  height: 1px !important;' +
       '  max-height: 1px !important;' +
       '  opacity: 0 !important;' +
@@ -319,6 +321,17 @@ object AntigravityBridgeScript {
       '  animation: none !important;' +
       '}'
     );
+
+    // Prevent root-level horizontal page drift in mobile/tablet mode without breaking
+    // position:sticky or inner horizontally-scrollable code/diff blocks
+    if (!config.isDesktopMode) {
+      css.push(
+        'html, body {' +
+        '  overflow-x: clip !important;' +
+        '  max-width: 100% !important;' +
+        '}'
+      );
+    }
 
     // Tablet scroll unlock while keyboard is open
     if (config.isTablet) {
@@ -688,11 +701,22 @@ object AntigravityBridgeScript {
     }
   }
 
+  function resetHorizontalDrift() {
+    if (config.isDesktopMode) return;
+    if (window.visualViewport && window.visualViewport.scale > 1.02) return;
+    if (window.scrollX !== 0 || (document.documentElement && document.documentElement.scrollLeft !== 0)) {
+      window.scrollTo(0, window.scrollY || 0);
+      if (document.documentElement) document.documentElement.scrollLeft = 0;
+      if (document.body) document.body.scrollLeft = 0;
+    }
+  }
+
   function installScrollTracker() {
     var scrollRaf = 0;
     var pendingScrollTarget = null;
 
     document.addEventListener('touchstart', function(e) {
+      resetHorizontalDrift();
       var scroller = findScrollableAncestor(e.target);
       if (scroller) {
         emitScrollState(scroller.scrollTop > 2);
@@ -707,6 +731,7 @@ object AntigravityBridgeScript {
       if (scrollRaf) return;
       scrollRaf = window.requestAnimationFrame(function() {
         scrollRaf = 0;
+        resetHorizontalDrift();
         var target = pendingScrollTarget;
         pendingScrollTarget = null;
         if (target && target.nodeType === 1) {
@@ -718,6 +743,11 @@ object AntigravityBridgeScript {
         }
       });
     }, { capture: true, passive: true });
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('scroll', resetHorizontalDrift, { passive: true });
+      window.visualViewport.addEventListener('resize', resetHorizontalDrift, { passive: true });
+    }
   }
 
   // 7. Lexical text insertion & send
@@ -1636,9 +1666,11 @@ object AntigravityBridgeScript {
         if (typeof cmd.nativeComposerEnabled === 'boolean') config.nativeComposerEnabled = cmd.nativeComposerEnabled;
         if (typeof cmd.showVoiceButton === 'boolean') config.showVoiceButton = cmd.showVoiceButton;
         if (typeof cmd.isTablet === 'boolean') config.isTablet = cmd.isTablet;
+        if (typeof cmd.isDesktopMode === 'boolean') config.isDesktopMode = cmd.isDesktopMode;
         if (typeof cmd.enhancedWebComposer === 'boolean') config.enhancedWebComposer = cmd.enhancedWebComposer;
         if (typeof cmd.composerSpacerPx === 'number') config.composerSpacerPx = cmd.composerSpacerPx;
         ensureStyles();
+        resetHorizontalDrift();
         reportComposerState(true);
         break;
 

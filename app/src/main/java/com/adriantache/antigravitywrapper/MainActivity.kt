@@ -405,12 +405,13 @@ fun AntigravityApp(
     }
 
     // Push live config updates into the iframe whenever toggles, screen width, or split-view spacer change
-    LaunchedEffect(isNativeComposerEnabled, isShowVoiceButtonEnabled, isTablet, composerSpacerPx) {
+    LaunchedEffect(isNativeComposerEnabled, isShowVoiceButtonEnabled, isTablet, isDesktopMode, composerSpacerPx) {
         webBridge.updateConfig(
             BridgeConfig(
                 nativeComposerEnabled = isNativeComposerEnabled,
                 showVoiceButton = isShowVoiceButtonEnabled,
                 isTablet = isTablet,
+                isDesktopMode = isDesktopMode,
                 enhancedWebComposer = true,
                 composerSpacerPx = composerSpacerPx
             )

@@ -243,6 +243,7 @@ class ComposerBridgeProtocolTest {
                     nativeComposerEnabled = true,
                     showVoiceButton = false,
                     isTablet = true,
+                    isDesktopMode = true,
                     enhancedWebComposer = true,
                     composerSpacerPx = 112
                 )
@@ -252,6 +253,7 @@ class ComposerBridgeProtocolTest {
         assertTrue(cfgJson.getBoolean("nativeComposerEnabled"))
         assertFalse(cfgJson.getBoolean("showVoiceButton"))
         assertTrue(cfgJson.getBoolean("isTablet"))
+        assertTrue(cfgJson.getBoolean("isDesktopMode"))
         assertTrue(cfgJson.getBoolean("enhancedWebComposer"))
         assertEquals(112, cfgJson.getInt("composerSpacerPx"))
 
