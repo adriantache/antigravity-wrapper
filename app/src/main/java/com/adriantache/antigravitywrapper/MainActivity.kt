@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -223,8 +224,14 @@ fun AntigravityApp(
     var connectionErrorMessage by remember { mutableStateOf("") }
     var failingUrl by remember { mutableStateOf("") }
 
-    // Native composer & bridge state
+    // Native composer & bridge state (per-conversation drafts)
     var composerState by remember { mutableStateOf(ComposerState()) }
+    val draftsByConversation = remember {
+        mutableStateMapOf<String, String>().apply {
+            putAll(preferencesManager.loadDrafts())
+        }
+    }
+    var activeConversationKey by rememberSaveable { mutableStateOf("") }
     var draftText by rememberSaveable { mutableStateOf("") }
     var attachedFileNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var isAttachingFiles by remember { mutableStateOf(false) }
@@ -260,6 +267,21 @@ fun AntigravityApp(
             context = context.applicationContext,
             configuredServerUrlProvider = { latestConfiguredUrl },
             onComposerStateChanged = { state ->
+                val newKey = state.conversationKey
+                if (state.hasComposer && newKey.isNotBlank() && newKey != activeConversationKey) {
+                    if (activeConversationKey.isNotBlank()) {
+                        if (draftText.isNotEmpty()) {
+                            draftsByConversation[activeConversationKey] = draftText
+                        } else {
+                            draftsByConversation.remove(activeConversationKey)
+                        }
+                        preferencesManager.saveDraft(activeConversationKey, draftText)
+                    }
+                    activeConversationKey = newKey
+                    draftText = draftsByConversation[newKey].orEmpty()
+                    attachedFileNames = emptyList()
+                    showUsageCard = false
+                }
                 composerState = state
             },
             onModelsLoaded = { models, hasViewUsage ->
@@ -298,6 +320,10 @@ fun AntigravityApp(
                 isSendingMessage = false
                 if (ok) {
                     draftText = ""
+                    if (activeConversationKey.isNotBlank()) {
+                        draftsByConversation.remove(activeConversationKey)
+                        preferencesManager.saveDraft(activeConversationKey, "")
+                    }
                     attachedFileNames = emptyList()
                     // Dismiss on-screen soft keyboard after sending, but keep focus for hardware keyboards
                     if (!lastSendWasHardwareKeyboard && !latestHasHardwareKeyboard) {
@@ -389,6 +415,14 @@ fun AntigravityApp(
                 composerSpacerPx = composerSpacerPx
             )
         )
+    }
+
+    // Debounce persisting the active conversation's draft to SharedPreferences
+    LaunchedEffect(activeConversationKey, draftText) {
+        if (activeConversationKey.isNotBlank()) {
+            delay(400L)
+            preferencesManager.saveDraft(activeConversationKey, draftText)
+        }
     }
 
     // Hand off focus to native TextField when web UI auto-focuses its hidden editor (e.g. "+ New Conversation")
@@ -746,7 +780,18 @@ fun AntigravityApp(
                         composerHeightPx = coords.size.height
                     },
                     text = draftText,
-                    onTextChange = { draftText = it },
+                    onTextChange = { updated ->
+                        draftText = updated
+                        val key = activeConversationKey.ifBlank { composerState.conversationKey }
+                        if (key.isNotBlank()) {
+                            activeConversationKey = key
+                            if (updated.isNotEmpty()) {
+                                draftsByConversation[key] = updated
+                            } else {
+                                draftsByConversation.remove(key)
+                            }
+                        }
+                    },
                     composerState = composerState,
                     attachedFileNames = attachedFileNames,
                     isAttaching = isAttachingFiles,

@@ -22,6 +22,7 @@ class ComposerBridgeProtocolTest {
             {
               "type": "composerState",
               "hasComposer": true,
+              "conversationKey": "id:c8a360ee-ba51-4cab-9a3d-94ff9e87fd31",
               "currentModel": "Gemini 4 Neon High",
               "currentPermissions": "Turbo",
               "isGenerating": true,
@@ -34,6 +35,7 @@ class ComposerBridgeProtocolTest {
 
         val event = ComposerBridgeProtocol.parseEvent(raw) as BridgeEvent.ComposerStateChanged
         assertTrue(event.state.hasComposer)
+        assertEquals("id:c8a360ee-ba51-4cab-9a3d-94ff9e87fd31", event.state.conversationKey)
         assertEquals("Gemini 4 Neon High", event.state.currentModel)
         assertEquals("Turbo", event.state.currentPermissions)
         assertTrue(event.state.isGenerating)

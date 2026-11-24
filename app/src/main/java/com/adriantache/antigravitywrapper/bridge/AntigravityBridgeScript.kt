@@ -32,8 +32,12 @@ object AntigravityBridgeScript {
     composerSpacerPx: 0
   };
   var lastStateJson = '';
+  var lastReportedHasComposer = false;
+  var lastCssText = '';
   var lastCanScrollUp = null;
   var stateTimer = null;
+  var navTimers = [];
+  var lastKnownHref = window.location.href;
   var isSending = false;
   var pendingAttachBatches = {};
 
@@ -247,17 +251,21 @@ object AntigravityBridgeScript {
     var spacerPx = Math.max(0, Math.round(Number(config.composerSpacerPx) || 0));
 
     // Offscreen-hide the web composer card while Native Composer is active
-    // (kept mounted & non-display:none so Lexical paste + Base UI menus stay actionable)
+    // (kept mounted & non-display:none so Lexical paste + Base UI menus stay actionable;
+    // anchored at x=0 with clip-path + CSS containment to avoid inflating compositor bounds or reflowing chat)
     css.push(
       'body.agy-native-composer-active [data-testid="agent-input-box"] .surface-composer-card {' +
       '  position: fixed !important;' +
-      '  left: -10000px !important;' +
-      '  top: 0 !important;' +
-      '  width: 420px !important;' +
-      '  max-height: 120px !important;' +
+      '  left: 0 !important;' +
+      '  bottom: 0 !important;' +
+      '  width: 320px !important;' +
+      '  height: 1px !important;' +
+      '  max-height: 1px !important;' +
       '  opacity: 0 !important;' +
       '  pointer-events: none !important;' +
       '  z-index: -1 !important;' +
+      '  clip-path: inset(100%) !important;' +
+      '  contain: layout paint style !important;' +
       '  overflow: hidden !important;' +
       '}' +
       'body.agy-native-composer-active [data-testid="agent-input-box"] {' +
@@ -323,7 +331,11 @@ object AntigravityBridgeScript {
       );
     }
 
-    style.textContent = css.join('\n');
+    var cssText = css.join('\n');
+    if (cssText !== lastCssText || style.textContent !== cssText) {
+      lastCssText = cssText;
+      style.textContent = cssText;
+    }
     syncBodyClasses();
   }
 
@@ -389,64 +401,77 @@ object AntigravityBridgeScript {
     return false;
   }
 
+  function setClass(el, className, active) {
+    if (!el || !el.classList) return;
+    var has = el.classList.contains(className);
+    if (active && !has) {
+      el.classList.add(className);
+    } else if (!active && has) {
+      el.classList.remove(className);
+    }
+  }
+
+  function hasSingleVisibleChild(parent) {
+    if (!parent) return false;
+    var children = parent.children;
+    var count = 0;
+    for (var i = 0; i < children.length; i++) {
+      var cs = window.getComputedStyle(children[i]);
+      if (cs.display !== 'none' && cs.visibility !== 'hidden') {
+        count++;
+        if (count > 1) return false;
+      }
+    }
+    return count === 1;
+  }
+
   function syncBodyClasses(cachedHasComposer) {
     var body = document.body;
     if (!body) return false;
     var root = findComposerRoot();
     var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isComposerActuallyVisible();
     var isNativeActive = config.nativeComposerEnabled && hasComposer;
-    if (isNativeActive) {
-      body.classList.add('agy-native-composer-active');
-    } else {
-      body.classList.remove('agy-native-composer-active');
-    }
+
+    // Pure READ phase first (avoid read-after-write forced synchronous style/layout recalculation)
+    var shell = null;
+    var shellHasExtra = false;
+    var rootHasExtra = false;
+    var isEmptyShell = false;
+    var parentCollapseFlags = [];
     if (root) {
       attachComposerObserver(root);
       var card = root.querySelector('.surface-composer-card');
-      var shell = root.querySelector('.surface-composer, [id="antigravity.agentSidePanelInputBox"]');
-      var shellHasExtra = shell ? hasVisibleContentExcluding(shell, new Set([card])) : false;
-      var rootHasExtra = hasVisibleContentExcluding(root, new Set([card, shell]));
-
-      if (shell) {
-        if (isNativeActive && !shellHasExtra) {
-          shell.classList.add('agy-empty-shell-inner');
-        } else {
-          shell.classList.remove('agy-empty-shell-inner');
-        }
+      shell = root.querySelector('.surface-composer, [id="antigravity.agentSidePanelInputBox"]');
+      if (isNativeActive) {
+        shellHasExtra = shell ? hasVisibleContentExcluding(shell, new Set([card])) : false;
+        rootHasExtra = hasVisibleContentExcluding(root, new Set([card, shell]));
+        isEmptyShell = !rootHasExtra && !shellHasExtra;
       }
 
-      var isEmptyShell = isNativeActive && !rootHasExtra && !shellHasExtra;
-      if (isEmptyShell) {
-        root.classList.add('agy-empty-composer-shell');
-      } else {
-        root.classList.remove('agy-empty-composer-shell');
-      }
-
-      // Collapse single-child sticky footer wrappers (e.g. border-t / padding around quick composer)
       var p = root.parentElement;
       for (var depth = 0; depth < 2 && p && p !== document.body && p !== document.documentElement; depth++) {
-        var visibleChildren = Array.prototype.slice.call(p.children).filter(function(c) {
-          var cs = window.getComputedStyle(c);
-          return cs.display !== 'none' && cs.visibility !== 'hidden';
-        });
-        if (visibleChildren.length === 1 && isEmptyShell) {
-          p.classList.add('agy-empty-composer-parent');
-        } else {
-          p.classList.remove('agy-empty-composer-parent');
-          break;
-        }
+        var shouldCollapse = isEmptyShell && hasSingleVisibleChild(p);
+        parentCollapseFlags.push({ el: p, collapse: shouldCollapse });
+        if (!shouldCollapse) break;
         p = p.parentElement;
       }
+    }
 
+    // Pure WRITE phase
+    setClass(body, 'agy-native-composer-active', isNativeActive);
+    if (root) {
+      if (shell) {
+        setClass(shell, 'agy-empty-shell-inner', isNativeActive && !shellHasExtra);
+      }
+      setClass(root, 'agy-empty-composer-shell', isEmptyShell);
+      for (var j = 0; j < parentCollapseFlags.length; j++) {
+        setClass(parentCollapseFlags[j].el, 'agy-empty-composer-parent', parentCollapseFlags[j].collapse);
+      }
       if (isNativeActive && document.activeElement) {
         handOffHiddenLexicalFocus(document.activeElement);
       }
     }
-    if (config.isTablet) {
-      body.classList.add('agy-tablet-scroll');
-    } else {
-      body.classList.remove('agy-tablet-scroll');
-    }
+    setClass(body, 'agy-tablet-scroll', !!config.isTablet);
     return hasComposer;
   }
 
@@ -489,7 +514,6 @@ object AntigravityBridgeScript {
   // 5. State observation
   var observedComposerRoot = null;
   var composerObserver = null;
-  var structuralTimer = null;
 
   function attachComposerObserver(root) {
     if (!root || root === observedComposerRoot) return;
@@ -506,8 +530,74 @@ object AntigravityBridgeScript {
     });
   }
 
+  function computeConversationKey(hasComposer) {
+    if (!hasComposer) return '';
+
+    // 1. Check iframe URL path/query/hash for a UUID conversation ID
+    var urlPart = (window.location.pathname || '') + (window.location.search || '') + (window.location.hash || '');
+    var uuidMatch = urlPart.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) {
+      return 'id:' + uuidMatch[0].toLowerCase();
+    }
+
+    // 2. Mobile full-width Projects / Conversations list quick-start composer
+    var sidebar = document.querySelector('[data-testid="conversation-list-sidebar"], [data-sidebar-scroll-container="true"]');
+    if (sidebar) {
+      var sRect = sidebar.getBoundingClientRect();
+      if (sRect.width >= window.innerWidth * 0.7 && sRect.right > 20 && sRect.left < window.innerWidth - 20) {
+        return 'projects_list';
+      }
+    }
+
+    // 3. New Conversation screen (shows project selector inside composer)
+    var root = findComposerRoot();
+    var projectTrigger = root ? root.querySelector('[data-testid="project-selector-trigger"]') : null;
+    if (projectTrigger) {
+      var projName = extractTriggerLabel(projectTrigger, /^Select project,?\s*/i) || 'default';
+      return 'new:' + projName;
+    }
+
+    // 4. Active / selected conversation item in sidebar
+    if (sidebar) {
+      var activeItem = sidebar.querySelector('[aria-current="page"], [aria-selected="true"], [data-active="true"], [data-selected="true"]');
+      if (activeItem) {
+        var itemId = activeItem.getAttribute('data-conversation-id') ||
+          activeItem.getAttribute('data-id') ||
+          activeItem.getAttribute('href') ||
+          (activeItem.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+        if (itemId) return 'sidebar:' + itemId;
+      }
+    }
+
+    // 5. Top header / breadcrumb bar (or mobile header row next to Back button)
+    var header = document.querySelector('header, [role="banner"]');
+    if (header) {
+      var headerTxt = (header.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100);
+      if (headerTxt) return 'header:' + headerTxt;
+    }
+    var backBtn = document.querySelector('button[aria-label*="Back" i], button[title*="Back" i]');
+    if (backBtn && backBtn.parentElement) {
+      var barTxt = (backBtn.parentElement.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100);
+      if (barTxt) return 'bar:' + barTxt;
+    }
+
+    // 6. Fallback: first heading or non-generic document.title (O(1), no layout queries)
+    var heading = document.querySelector('h1, h2');
+    if (heading) {
+      var hTxt = (heading.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+      if (hTxt) return 'title:' + hTxt;
+    }
+    var docTitle = (document.title || '').trim();
+    if (docTitle && !/^antigravity(\s+remote)?$/i.test(docTitle)) {
+      return 'doctitle:' + docTitle.slice(0, 100);
+    }
+
+    return 'url:' + urlPart;
+  }
+
   function computeComposerState(cachedHasComposer) {
     var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isComposerActuallyVisible();
+    var conversationKey = computeConversationKey(hasComposer);
     var modelTrigger = findModelTrigger();
     var permTrigger = findPermissionsTrigger();
     var stopBtn = findStopButton();
@@ -534,6 +624,7 @@ object AntigravityBridgeScript {
     return {
       type: 'composerState',
       hasComposer: hasComposer,
+      conversationKey: conversationKey,
       currentModel: extractTriggerLabel(modelTrigger, /^Select model,?\s*/i),
       currentPermissions: extractTriggerLabel(permTrigger, /^Agent permissions preset selector,?\s*/i),
       isGenerating: !!stopBtn,
@@ -545,7 +636,9 @@ object AntigravityBridgeScript {
   }
 
   function reportComposerState(force) {
+    lastKnownHref = window.location.href;
     var hasComposer = syncBodyClasses();
+    lastReportedHasComposer = hasComposer;
     var state = computeComposerState(hasComposer);
     var json = JSON.stringify(state);
     if (force || json !== lastStateJson) {
@@ -562,18 +655,15 @@ object AntigravityBridgeScript {
     }, 120);
   }
 
-  function scheduleStructuralReport() {
-    if (structuralTimer) return;
-    structuralTimer = setTimeout(function() {
-      structuralTimer = null;
-      var currentRoot = findComposerRoot();
-      if (currentRoot !== observedComposerRoot) {
-        if (currentRoot) attachComposerObserver(currentRoot);
-        reportComposerState(false);
-      } else {
-        reportComposerState(false);
-      }
-    }, 300);
+  function scheduleNavigationCheck() {
+    for (var i = 0; i < navTimers.length; i++) {
+      clearTimeout(navTimers[i]);
+    }
+    navTimers = [
+      setTimeout(function() { reportComposerState(false); }, 120),
+      setTimeout(function() { reportComposerState(false); }, 600),
+      setTimeout(function() { reportComposerState(false); }, 1500)
+    ];
   }
 
   // 6. Inner SPA scroll tracking for native Pull-to-Refresh
@@ -583,10 +673,7 @@ object AntigravityBridgeScript {
       if (el.nodeType === 1) {
         var cs = window.getComputedStyle(el);
         if (/(auto|scroll|overlay)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 4) {
-          var rect = el.getBoundingClientRect();
-          if (rect.right > 0 && rect.width > 40) {
-            return el;
-          }
+          return el;
         }
       }
       el = el.parentElement;
@@ -602,6 +689,9 @@ object AntigravityBridgeScript {
   }
 
   function installScrollTracker() {
+    var scrollRaf = 0;
+    var pendingScrollTarget = null;
+
     document.addEventListener('touchstart', function(e) {
       var scroller = findScrollableAncestor(e.target);
       if (scroller) {
@@ -611,16 +701,22 @@ object AntigravityBridgeScript {
       }
     }, { capture: true, passive: true });
 
+    // Coalesce scroll events to at most 1 rAF per frame with zero getBoundingClientRect() calls
     document.addEventListener('scroll', function(e) {
-      var target = e.target;
-      if (target && target.nodeType === 1) {
-        var rect = target.getBoundingClientRect();
-        if (rect.right > 0 && rect.width > 40 && target.scrollHeight > target.clientHeight + 4) {
-          emitScrollState(target.scrollTop > 2);
+      pendingScrollTarget = e.target;
+      if (scrollRaf) return;
+      scrollRaf = window.requestAnimationFrame(function() {
+        scrollRaf = 0;
+        var target = pendingScrollTarget;
+        pendingScrollTarget = null;
+        if (target && target.nodeType === 1) {
+          if (target.scrollHeight > target.clientHeight + 4) {
+            emitScrollState(target.scrollTop > 2);
+          }
+        } else {
+          emitScrollState(window.scrollY > 2);
         }
-      } else {
-        emitScrollState(window.scrollY > 2);
-      }
+      });
     }, { capture: true, passive: true });
   }
 
@@ -1634,6 +1730,7 @@ object AntigravityBridgeScript {
 
       case 'dispatchEscape':
         dispatchEscape();
+        scheduleNavigationCheck();
         break;
 
       case 'refreshState':
@@ -1649,19 +1746,22 @@ object AntigravityBridgeScript {
     installFocusGuard();
     installScrollTracker();
 
-    var target = document.body || document.documentElement;
-    if (target) {
-      // Lightweight structural observer on body (NO attribute observation on thousands of chat nodes!)
-      // Detailed attribute/subtree watching is scoped strictly to [data-testid="agent-input-box"].
-      var bodyObserver = new MutationObserver(scheduleStructuralReport);
-      bodyObserver.observe(target, { childList: true, subtree: true });
-      if (typeof ResizeObserver === 'function') {
-        try {
-          var ro = new ResizeObserver(scheduleStateReport);
-          ro.observe(target);
-        } catch (e) {}
+    // Zero-DOM-mutation-overhead watchdog: never attach a document.body subtree MutationObserver
+    // or ResizeObserver (which fire thousands of times while React hydrates long conversations).
+    // Detailed attribute/subtree watching is scoped strictly to [data-testid="agent-input-box"].
+    setInterval(function() {
+      var hrefChanged = window.location.href !== lastKnownHref;
+      var rootDetached = !observedComposerRoot || !document.contains(observedComposerRoot);
+      if (!hrefChanged && !rootDetached) return;
+      if (rootDetached) observedComposerRoot = null;
+      var currentRoot = findComposerRoot();
+      if (currentRoot) {
+        attachComposerObserver(currentRoot);
+        reportComposerState(false);
+      } else if (hrefChanged || lastReportedHasComposer) {
+        reportComposerState(false);
       }
-    }
+    }, 500);
 
     document.addEventListener('transitionend', function(e) {
       var prop = e && e.propertyName;
@@ -1669,8 +1769,32 @@ object AntigravityBridgeScript {
         scheduleStateReport();
       }
     }, true);
-    document.addEventListener('click', scheduleStateReport, true);
+    document.addEventListener('click', function(e) {
+      if (e && e.isTrusted) scheduleNavigationCheck();
+    }, true);
     window.addEventListener('resize', scheduleStateReport);
+    window.addEventListener('popstate', scheduleNavigationCheck);
+    window.addEventListener('hashchange', scheduleNavigationCheck);
+
+    // Report SPA navigation changes immediately (conversation switching / back navigation)
+    try {
+      var origPush = history.pushState;
+      if (typeof origPush === 'function') {
+        history.pushState = function() {
+          var res = origPush.apply(this, arguments);
+          scheduleNavigationCheck();
+          return res;
+        };
+      }
+      var origReplace = history.replaceState;
+      if (typeof origReplace === 'function') {
+        history.replaceState = function() {
+          var res = origReplace.apply(this, arguments);
+          scheduleNavigationCheck();
+          return res;
+        };
+      }
+    } catch (e) {}
 
     var initialRoot = findComposerRoot();
     if (initialRoot) attachComposerObserver(initialRoot);

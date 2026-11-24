@@ -5,6 +5,7 @@ import org.json.JSONObject
 
 data class ComposerState(
     val hasComposer: Boolean = false,
+    val conversationKey: String = "",
     val currentModel: String = "",
     val currentPermissions: String = "",
     val isGenerating: Boolean = false,
@@ -96,6 +97,7 @@ object ComposerBridgeProtocol {
                     BridgeEvent.ComposerStateChanged(
                         ComposerState(
                             hasComposer = json.optBoolean("hasComposer", false),
+                            conversationKey = normalizeSingleLine(json.optString("conversationKey", "")),
                             currentModel = json.optString("currentModel", ""),
                             currentPermissions = json.optString("currentPermissions", ""),
                             isGenerating = json.optBoolean("isGenerating", false),

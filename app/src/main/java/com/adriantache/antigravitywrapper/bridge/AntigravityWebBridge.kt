@@ -45,7 +45,7 @@ class AntigravityWebBridge(
     )
 
     fun attachTo(webView: WebView) {
-        val allowedOrigins = setOf("*")
+        val allowedOrigins = buildAllowedOriginRules(configuredServerUrlProvider())
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(
@@ -73,6 +73,23 @@ class AntigravityWebBridge(
                 allowedOrigins
             )
         }
+    }
+
+    private fun buildAllowedOriginRules(configuredServerUrl: String): Set<String> {
+        val rules = linkedSetOf(
+            "https://antigravity.static.usercontent.goog",
+            "https://*.antigravity.static.usercontent.goog",
+            "https://antigravity.google.com",
+            "https://*.antigravity.google.com",
+            "https://antigravity.google",
+            "https://*.antigravity.google"
+        )
+        UrlPolicy.extractEndpoint(configuredServerUrl)?.let { ep ->
+            val portPart = if (ep.explicitPort != -1) ":${ep.explicitPort}" else ""
+            val hostPart = if (ep.host.contains(":")) "[${ep.host}]" else ep.host
+            rules.add("${ep.scheme}://$hostPart$portPart")
+        }
+        return rules
     }
 
     private fun handleEvent(

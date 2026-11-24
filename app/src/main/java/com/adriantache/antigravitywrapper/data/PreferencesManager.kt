@@ -2,6 +2,7 @@ package com.adriantache.antigravitywrapper.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import org.json.JSONObject
 
 class PreferencesManager(context: Context) {
     private val prefs: SharedPreferences =
@@ -16,6 +17,8 @@ class PreferencesManager(context: Context) {
         private const val KEY_DOUBLE_BACK_EXIT = "double_back_exit"
         private const val KEY_NATIVE_COMPOSER = "native_composer"
         private const val KEY_SHOW_VOICE_BUTTON = "show_voice_button"
+        private const val KEY_CONVERSATION_DRAFTS = "conversation_drafts"
+        private const val MAX_SAVED_DRAFTS = 25
 
         const val DEFAULT_URL = "https://antigravity.google.com/remote?path=%2Fview%2Fremote-control"
     }
@@ -77,4 +80,39 @@ class PreferencesManager(context: Context) {
     var isShowVoiceButtonEnabled: Boolean
         get() = prefs.getBoolean(KEY_SHOW_VOICE_BUTTON, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_VOICE_BUTTON, value).apply()
+
+    fun loadDrafts(): Map<String, String> {
+        val raw = prefs.getString(KEY_CONVERSATION_DRAFTS, null) ?: return emptyMap()
+        return try {
+            val json = JSONObject(raw)
+            buildMap {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    val value = json.optString(key, "")
+                    if (key.isNotBlank() && value.isNotEmpty()) {
+                        put(key, value)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    fun saveDraft(conversationKey: String, draft: String) {
+        if (conversationKey.isBlank()) return
+        val current = LinkedHashMap(loadDrafts())
+        current.remove(conversationKey)
+        if (draft.isNotEmpty()) {
+            current[conversationKey] = draft
+        }
+        while (current.size > MAX_SAVED_DRAFTS) {
+            val oldestKey = current.keys.firstOrNull() ?: break
+            current.remove(oldestKey)
+        }
+        val json = JSONObject()
+        current.forEach { (k, v) -> json.put(k, v) }
+        prefs.edit().putString(KEY_CONVERSATION_DRAFTS, json.toString()).apply()
+    }
 }
