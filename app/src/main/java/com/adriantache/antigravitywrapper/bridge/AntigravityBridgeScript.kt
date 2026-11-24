@@ -40,7 +40,18 @@ object AntigravityBridgeScript {
   var navTimers = [];
   var lastKnownHref = window.location.href;
   var isSending = false;
+  var isScrapingOverlay = false;
+  var suppressNativeFocusUntil = 0;
   var pendingAttachBatches = {};
+
+  function beginOverlayScrape() {
+    isScrapingOverlay = true;
+  }
+
+  function endOverlayScrape() {
+    isScrapingOverlay = false;
+    suppressNativeFocusUntil = Date.now() + 600;
+  }
 
   function postToNative(payload) {
     try {
@@ -105,9 +116,24 @@ object AntigravityBridgeScript {
   })();
 
   // 2. DOM finders based on verified antigravity.static.usercontent.goog structure
+  function findAllComposerRoots() {
+    var list = Array.prototype.slice.call(document.querySelectorAll('[data-testid="agent-input-box"]'));
+    var byId = document.getElementById('antigravity.agentSidePanelInputBox');
+    if (byId) {
+      var covered = list.some(function(r) { return r === byId || r.contains(byId); });
+      if (!covered) list.push(byId);
+    }
+    return list;
+  }
+
   function findComposerRoot() {
-    return document.querySelector('[data-testid="agent-input-box"]') ||
-      document.getElementById('antigravity.agentSidePanelInputBox');
+    var roots = findAllComposerRoots();
+    if (roots.length === 0) return null;
+    if (roots.length === 1) return roots[0];
+    for (var i = 0; i < roots.length; i++) {
+      if (isRootActuallyVisible(roots[i])) return roots[i];
+    }
+    return roots[0];
   }
 
   function findComposerCard() {
@@ -255,7 +281,8 @@ object AntigravityBridgeScript {
     // (kept mounted & non-display:none so Lexical paste + Base UI menus stay actionable;
     // anchored at x=0 with clip-path + CSS containment to avoid inflating compositor bounds or reflowing chat)
     css.push(
-      'body.agy-native-composer-active [data-testid="agent-input-box"] .surface-composer-card {' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"] .surface-composer-card,' +
+      'body.agy-native-composer-active [id="antigravity.agentSidePanelInputBox"] .surface-composer-card {' +
       '  position: fixed !important;' +
       '  left: 0 !important;' +
       '  bottom: 0 !important;' +
@@ -273,36 +300,44 @@ object AntigravityBridgeScript {
       'body.agy-native-composer-active [data-testid="agent-input-box"] {' +
       '  padding-bottom: ' + (spacerPx > 0 ? spacerPx : 4) + 'px !important;' +
       '}' +
-      'body.agy-native-composer-active .agy-empty-composer-parent {' +
+      'body.agy-native-composer-active [data-agy-empty-composer-parent="true"] {' +
+      (spacerPx === 0 ? '  height: 0 !important;' : '') +
+      '  min-height: 0 !important;' +
       '  padding-top: 0 !important;' +
       '  padding-bottom: 0 !important;' +
       '  margin-top: 0 !important;' +
       '  margin-bottom: 0 !important;' +
-      '  border-top: 0 !important;' +
-      '  border-bottom: 0 !important;' +
-      '  min-height: 0 !important;' +
+      '  border: 0 !important;' +
+      '  outline: none !important;' +
+      '  box-shadow: none !important;' +
       '  background: transparent !important;' +
+      '  overflow: visible !important;' +
       '}' +
-      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell {' +
+      'body.agy-native-composer-active [data-testid="agent-input-box"][data-agy-empty-composer-shell="true"],' +
+      'body.agy-native-composer-active [data-agy-empty-composer-shell="true"] {' +
       '  height: ' + spacerPx + 'px !important;' +
       '  min-height: ' + spacerPx + 'px !important;' +
       '  padding: 0 !important;' +
       '  margin: 0 !important;' +
       '  border: 0 !important;' +
+      '  outline: none !important;' +
+      '  box-shadow: none !important;' +
       '  background: transparent !important;' +
       '  pointer-events: none !important;' +
       '  overflow: visible !important;' +
       '}' +
-      'body.agy-native-composer-active [data-testid="agent-input-box"] .agy-empty-shell-inner,' +
-      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell .surface-composer,' +
-      'body.agy-native-composer-active [data-testid="agent-input-box"].agy-empty-composer-shell [id="antigravity.agentSidePanelInputBox"] {' +
+      'body.agy-native-composer-active [data-agy-empty-shell-inner="true"],' +
+      'body.agy-native-composer-active [data-agy-empty-composer-shell="true"] .surface-composer,' +
+      'body.agy-native-composer-active [data-agy-empty-composer-shell="true"] [id="antigravity.agentSidePanelInputBox"] {' +
       '  height: 0 !important;' +
       '  min-height: 0 !important;' +
       '  padding: 0 !important;' +
       '  margin: 0 !important;' +
       '  border: 0 !important;' +
-      '  background: transparent !important;' +
+      '  outline: none !important;' +
       '  box-shadow: none !important;' +
+      '  background: transparent !important;' +
+      '  pointer-events: none !important;' +
       '  overflow: visible !important;' +
       '}'
     );
@@ -352,10 +387,12 @@ object AntigravityBridgeScript {
     syncBodyClasses();
   }
 
-  function isComposerActuallyVisible() {
-    var editor = findEditor();
-    var root = findComposerRoot();
-    if (!editor || !root) return false;
+  function isRootActuallyVisible(root) {
+    if (!root || !document.contains(root)) return false;
+    var editor = root.querySelector('[data-lexical-editor="true"][contenteditable="true"]') ||
+      root.querySelector('[aria-label="Message input"][contenteditable="true"]') ||
+      root.querySelector('[role="combobox"][contenteditable="true"]');
+    if (!editor) return false;
 
     var el = root;
     while (el && el !== document.documentElement) {
@@ -397,18 +434,43 @@ object AntigravityBridgeScript {
     return true;
   }
 
-  function hasVisibleContentExcluding(container, excludedSet) {
-    if (!container) return false;
-    var children = Array.prototype.slice.call(container.children);
-    for (var i = 0; i < children.length; i++) {
-      var child = children[i];
-      if (excludedSet.has(child)) continue;
-      var cs = window.getComputedStyle(child);
-      if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) continue;
-      // Use textContent instead of innerText to avoid synchronous full-page layout reflows
-      var txt = (child.textContent || '').trim();
-      if (txt.length > 0 || child.querySelector('button, a, img, svg, [role="button"]')) {
+  function isComposerActuallyVisible() {
+    return isRootActuallyVisible(findComposerRoot());
+  }
+
+  function elementHasVisibleContent(el, excludedNode) {
+    if (!el || el === excludedNode) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'script' || tag === 'style' || tag === 'template') return false;
+    if (tag === 'input' && (el.type === 'file' || el.type === 'hidden')) return false;
+    if (el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+
+    var cs = window.getComputedStyle(el);
+    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) {
+      return false;
+    }
+    // Ignore visually hidden screen-reader-only helpers (e.g. Tailwind sr-only)
+    if (cs.position === 'absolute' && cs.overflow === 'hidden' &&
+        parseFloat(cs.width) <= 2 && parseFloat(cs.height) <= 2) {
+      return false;
+    }
+
+    if (!excludedNode || !el.contains(excludedNode)) {
+      if (tag === 'button' || tag === 'a' || tag === 'img' || tag === 'svg' ||
+          tag === 'select' || tag === 'textarea' ||
+          (tag === 'input' && el.type !== 'file' && el.type !== 'hidden') ||
+          el.getAttribute('role') === 'button') {
         return true;
+      }
+    }
+
+    var nodes = el.childNodes;
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      if (node.nodeType === 3) {
+        if ((node.nodeValue || '').trim().length > 0) return true;
+      } else if (node.nodeType === 1) {
+        if (elementHasVisibleContent(node, excludedNode)) return true;
       }
     }
     return false;
@@ -424,13 +486,33 @@ object AntigravityBridgeScript {
     }
   }
 
+  function syncBoolAttr(prevNodes, nextNodes, attrName) {
+    var nextSet = new Set(nextNodes);
+    for (var i = 0; i < prevNodes.length; i++) {
+      var prev = prevNodes[i];
+      if (!nextSet.has(prev)) {
+        prev.removeAttribute(attrName);
+      }
+    }
+    for (var j = 0; j < nextNodes.length; j++) {
+      var next = nextNodes[j];
+      if (next && next.getAttribute(attrName) !== 'true') {
+        next.setAttribute(attrName, 'true');
+      }
+    }
+  }
+
   function hasSingleVisibleChild(parent) {
     if (!parent) return false;
     var children = parent.children;
     var count = 0;
     for (var i = 0; i < children.length; i++) {
-      var cs = window.getComputedStyle(children[i]);
-      if (cs.display !== 'none' && cs.visibility !== 'hidden') {
+      var child = children[i];
+      var tag = (child.tagName || '').toLowerCase();
+      if (tag === 'script' || tag === 'style' || tag === 'template') continue;
+      if (child.hidden || child.getAttribute('aria-hidden') === 'true') continue;
+      var cs = window.getComputedStyle(child);
+      if (cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) !== 0) {
         count++;
         if (count > 1) return false;
       }
@@ -441,45 +523,84 @@ object AntigravityBridgeScript {
   function syncBodyClasses(cachedHasComposer) {
     var body = document.body;
     if (!body) return false;
-    var root = findComposerRoot();
-    var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isComposerActuallyVisible();
+    var allRoots = findAllComposerRoots();
+    var root = null;
+    for (var ri = 0; ri < allRoots.length; ri++) {
+      if (isRootActuallyVisible(allRoots[ri])) {
+        root = allRoots[ri];
+        break;
+      }
+    }
+    if (!root && allRoots.length > 0) root = allRoots[0];
+
+    var hasComposer = typeof cachedHasComposer === 'boolean' ? cachedHasComposer : isRootActuallyVisible(root);
     var isNativeActive = config.nativeComposerEnabled && hasComposer;
 
-    // Pure READ phase first (avoid read-after-write forced synchronous style/layout recalculation)
-    var shell = null;
-    var shellHasExtra = false;
-    var rootHasExtra = false;
-    var isEmptyShell = false;
-    var parentCollapseFlags = [];
-    if (root) {
-      attachComposerObserver(root);
-      var card = root.querySelector('.surface-composer-card');
-      shell = root.querySelector('.surface-composer, [id="antigravity.agentSidePanelInputBox"]');
-      if (isNativeActive) {
-        shellHasExtra = shell ? hasVisibleContentExcluding(shell, new Set([card])) : false;
-        rootHasExtra = hasVisibleContentExcluding(root, new Set([card, shell]));
-        isEmptyShell = !rootHasExtra && !shellHasExtra;
-      }
+    // Pure READ phase first (avoid read-after-write forced synchronous style/layout recalculation).
+    // Uses React-immune data-agy-* attributes so React className updates never strip collapse rules.
+    var nextEmptyShells = [];
+    var nextEmptyInners = [];
+    var nextEmptyParents = [];
+    if (isNativeActive) {
+      for (var k = 0; k < allRoots.length; k++) {
+        var r = allRoots[k];
+        var card = r.querySelector('.surface-composer-card');
+        if (!card) continue;
 
-      var p = root.parentElement;
-      for (var depth = 0; depth < 2 && p && p !== document.body && p !== document.documentElement; depth++) {
-        var shouldCollapse = isEmptyShell && hasSingleVisibleChild(p);
-        parentCollapseFlags.push({ el: p, collapse: shouldCollapse });
-        if (!shouldCollapse) break;
-        p = p.parentElement;
+        // Collapse every empty wrapper between card and root (regardless of class/nesting depth)
+        var cur = card.parentElement;
+        while (cur && cur !== r && r.contains(cur)) {
+          if (!elementHasVisibleContent(cur, card)) {
+            nextEmptyInners.push(cur);
+            var curKids = cur.children;
+            for (var ck = 0; ck < curKids.length; ck++) {
+              var kid = curKids[ck];
+              if (kid !== card && !kid.contains(card)) {
+                nextEmptyInners.push(kid);
+              }
+            }
+          } else {
+            break;
+          }
+          cur = cur.parentElement;
+        }
+
+        // Collapse root itself and single-child sticky footer parents when root has no extra visible UI
+        var rootHasExtra = elementHasVisibleContent(r, card);
+        if (!rootHasExtra) {
+          nextEmptyShells.push(r);
+          var rootKids = r.children;
+          for (var rk = 0; rk < rootKids.length; rk++) {
+            var rKid = rootKids[rk];
+            if (rKid !== card && !rKid.contains(card)) {
+              nextEmptyInners.push(rKid);
+            }
+          }
+
+          var p = r.parentElement;
+          for (var depth = 0; depth < 4 && p && p !== document.body && p !== document.documentElement; depth++) {
+            if (hasSingleVisibleChild(p)) {
+              nextEmptyParents.push(p);
+              p = p.parentElement;
+            } else {
+              break;
+            }
+          }
+        }
       }
     }
 
+    var prevShells = document.querySelectorAll('[data-agy-empty-composer-shell="true"]');
+    var prevInners = document.querySelectorAll('[data-agy-empty-shell-inner="true"]');
+    var prevParents = document.querySelectorAll('[data-agy-empty-composer-parent="true"]');
+
     // Pure WRITE phase
     setClass(body, 'agy-native-composer-active', isNativeActive);
+    syncBoolAttr(prevShells, nextEmptyShells, 'data-agy-empty-composer-shell');
+    syncBoolAttr(prevInners, nextEmptyInners, 'data-agy-empty-shell-inner');
+    syncBoolAttr(prevParents, nextEmptyParents, 'data-agy-empty-composer-parent');
     if (root) {
-      if (shell) {
-        setClass(shell, 'agy-empty-shell-inner', isNativeActive && !shellHasExtra);
-      }
-      setClass(root, 'agy-empty-composer-shell', isEmptyShell);
-      for (var j = 0; j < parentCollapseFlags.length; j++) {
-        setClass(parentCollapseFlags[j].el, 'agy-empty-composer-parent', parentCollapseFlags[j].collapse);
-      }
+      attachComposerObserver(root);
       if (isNativeActive && document.activeElement) {
         handOffHiddenLexicalFocus(document.activeElement);
       }
@@ -499,6 +620,7 @@ object AntigravityBridgeScript {
     if (!editor) return;
     if (!isComposerActuallyVisible()) return;
     try { editor.blur(); } catch (e) {}
+    if (isScrapingOverlay || Date.now() < suppressNativeFocusUntil) return;
     var now = Date.now();
     if (now - lastNativeFocusRequestAt > 150) {
       lastNativeFocusRequestAt = now;
@@ -1207,6 +1329,7 @@ object AntigravityBridgeScript {
     var currentModelLower = extractTriggerLabel(trigger, /^Select model,?\s*/i).toLowerCase();
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
+    beginOverlayScrape();
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
@@ -1229,6 +1352,7 @@ object AntigravityBridgeScript {
       postToNative({ type: 'modelsList', models: models, hasViewUsage: hasViewUsage });
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
+      endOverlayScrape();
     }
   }
 
@@ -1317,6 +1441,7 @@ object AntigravityBridgeScript {
 
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
+    beginOverlayScrape();
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
@@ -1384,6 +1509,7 @@ object AntigravityBridgeScript {
         p.removeAttribute('data-agy-scraped-portal');
       });
       if (body) body.classList.remove('agy-scraping-menu');
+      endOverlayScrape();
     }
   }
 
@@ -1491,6 +1617,7 @@ object AntigravityBridgeScript {
     var prevModel = extractTriggerLabel(trigger, /^Select model,?\s*/i).toLowerCase();
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
+    beginOverlayScrape();
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
@@ -1570,6 +1697,7 @@ object AntigravityBridgeScript {
       }
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
+      endOverlayScrape();
     }
   }
 
@@ -1583,6 +1711,7 @@ object AntigravityBridgeScript {
     var currentLower = extractTriggerLabel(trigger, /^Agent permissions preset selector,?\s*/i).toLowerCase();
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
+    beginOverlayScrape();
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
@@ -1606,6 +1735,7 @@ object AntigravityBridgeScript {
       postToNative({ type: 'permissionsList', items: options });
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
+      endOverlayScrape();
     }
   }
 
@@ -1614,6 +1744,7 @@ object AntigravityBridgeScript {
     if (!trigger) return;
     var beforeSet = snapshotBodyChildren();
     var body = document.body;
+    beginOverlayScrape();
     if (body) body.classList.add('agy-scraping-menu');
 
     try {
@@ -1636,6 +1767,7 @@ object AntigravityBridgeScript {
       reportComposerState(true);
     } finally {
       if (body) body.classList.remove('agy-scraping-menu');
+      endOverlayScrape();
     }
   }
 
@@ -2021,9 +2153,12 @@ object AntigravityBridgeScript {
     setInterval(function() {
       var hrefChanged = window.location.href !== lastKnownHref;
       var rootDetached = !observedComposerRoot || !document.contains(observedComposerRoot);
-      if (!hrefChanged && !rootDetached) return;
-      if (rootDetached) observedComposerRoot = null;
       var currentRoot = findComposerRoot();
+      var rootChanged = currentRoot !== observedComposerRoot;
+      var bodyMissingNative = config.nativeComposerEnabled && lastReportedHasComposer &&
+        document.body && !document.body.classList.contains('agy-native-composer-active');
+      if (!hrefChanged && !rootDetached && !rootChanged && !bodyMissingNative) return;
+      if (rootDetached) observedComposerRoot = null;
       if (currentRoot) {
         attachComposerObserver(currentRoot);
         reportComposerState(false);

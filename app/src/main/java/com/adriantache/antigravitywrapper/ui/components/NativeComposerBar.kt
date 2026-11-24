@@ -9,8 +9,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -57,6 +59,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -131,6 +134,7 @@ fun NativeComposerBar(
     isFloatingOverlay: Boolean = false,
     isUsageOpen: Boolean = false,
     focusRequester: FocusRequester? = null,
+    onFocusChanged: (Boolean) -> Unit = {},
     onSend: (fromHardwareKeyboard: Boolean) -> Unit,
     onStop: () -> Unit,
     onOpenModelPicker: () -> Unit,
@@ -369,6 +373,9 @@ fun NativeComposerBar(
                                             Modifier
                                         }
                                     )
+                                    .onFocusChanged { focusState ->
+                                        onFocusChanged(focusState.isFocused)
+                                    }
                                     .onPreviewKeyEvent { keyEvent ->
                                         val isEnter = keyEvent.key == Key.Enter || keyEvent.key == Key.NumPadEnter
                                         val action = resolveExternalKeyboardEnterAction(
@@ -865,12 +872,14 @@ fun UsageOverlayCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+                .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Header row
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
@@ -1020,13 +1029,17 @@ fun UsageOverlayCard(
                             }
                             orderedItems.chunked(2).forEach { rowItems ->
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(IntrinsicSize.Min),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     rowItems.forEach { item ->
                                         UsageStatTile(
                                             item = item,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxHeight()
                                         )
                                     }
                                     if (rowItems.size == 1) {
@@ -1062,12 +1075,13 @@ private fun UsageStatTile(
 
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(14.dp),
         color = ComposerChipBg
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight()
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)

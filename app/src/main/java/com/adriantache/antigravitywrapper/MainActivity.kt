@@ -238,6 +238,7 @@ fun AntigravityApp(
     var isAttachingFiles by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
     var lastSendWasHardwareKeyboard by remember { mutableStateOf(false) }
+    var isComposerFocused by remember { mutableStateOf(false) }
     var pendingNativeFocus by remember { mutableStateOf(false) }
     val composerFocusRequester = remember { FocusRequester() }
     var composerHeightPx by remember { mutableIntStateOf(0) }
@@ -256,9 +257,11 @@ fun AntigravityApp(
     var isLoadingPermissions by remember { mutableStateOf(false) }
     var availablePermissions by remember { mutableStateOf<List<PermissionOption>>(emptyList()) }
 
-    // Floating Usage card state (stays above composer without dismissing keyboard)
+    // Floating Usage card state (stays above composer without changing focus/keyboard state)
     var showUsageCard by remember { mutableStateOf(false) }
     var isLoadingUsage by remember { mutableStateOf(false) }
+    var blockWebViewFocusForUsage by remember { mutableStateOf(false) }
+    var suppressNativeFocusUntilMs by remember { mutableLongStateOf(0L) }
     var usageSections by remember { mutableStateOf<List<UsageSection>>(emptyList()) }
     var showAllUsageSections by remember { mutableStateOf(false) }
 
@@ -313,6 +316,10 @@ fun AntigravityApp(
             onUsageLoaded = { sections ->
                 usageSections = sections
                 isLoadingUsage = false
+                if (!blockWebViewFocusForUsage) {
+                    suppressNativeFocusUntilMs = System.currentTimeMillis() + 600L
+                }
+                blockWebViewFocusForUsage = false
             },
             onScrollStateChanged = { canScroll ->
                 innerSpaCanScrollUp = canScroll
@@ -359,7 +366,9 @@ fun AntigravityApp(
                 }
             },
             onRequestNativeFocus = {
-                pendingNativeFocus = true
+                if (shouldAcceptNativeFocusRequest(isLoadingUsage, System.currentTimeMillis(), suppressNativeFocusUntilMs)) {
+                    pendingNativeFocus = true
+                }
             }
         )
     }
@@ -465,20 +474,44 @@ fun AntigravityApp(
         }
     }
 
+    LaunchedEffect(showNativeComposer) {
+        if (!showNativeComposer) {
+            isComposerFocused = false
+        }
+    }
+
     LaunchedEffect(isLoadingUsage) {
         if (isLoadingUsage) {
             delay(4500L)
             if (isLoadingUsage) {
                 isLoadingUsage = false
+                blockWebViewFocusForUsage = false
             }
         }
     }
 
-    // Prevent WebView's hidden Base UI menu/dialog focus-trap from stealing Android View focus
-    // (and dismissing the soft keyboard) while silently scraping Usage data.
-    DisposableEffect(isLoadingUsage, webViewInstance) {
+    fun startUsageFetch(preserveComposerFocus: Boolean) {
+        val shouldBlock = shouldBlockWebViewFocusDuringUsage(
+            isLoadingUsage = true,
+            isComposerFocused = preserveComposerFocus
+        )
+        isLoadingUsage = true
+        blockWebViewFocusForUsage = shouldBlock
+        if (!shouldBlock) {
+            suppressNativeFocusUntilMs = System.currentTimeMillis() + 5000L
+        }
+        if (!webBridge.requestUsage()) {
+            isLoadingUsage = false
+            blockWebViewFocusForUsage = false
+        }
+    }
+
+    // Only block WebView focusability while scraping Usage if the native composer currently owns focus.
+    // Calling isFocusable = false while WebView itself holds focus triggers View.clearFocus() ->
+    // rootViewRequestFocus(), which would unexpectedly focus BasicTextField and open the keyboard.
+    DisposableEffect(blockWebViewFocusForUsage, webViewInstance) {
         val wv = webViewInstance
-        if (isLoadingUsage && wv != null) {
+        if (blockWebViewFocusForUsage && wv != null && !wv.hasFocus()) {
             wv.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             wv.isFocusable = false
             wv.isFocusableInTouchMode = false
@@ -585,6 +618,8 @@ fun AntigravityApp(
     BackHandler(enabled = true) {
         if (showUsageCard) {
             showUsageCard = false
+            isLoadingUsage = false
+            blockWebViewFocusForUsage = false
             return@BackHandler
         }
         if (showModelSheet) {
@@ -812,16 +847,17 @@ fun AntigravityApp(
                         showAllSections = showAllUsageSections,
                         onToggleShowAll = { showAllUsageSections = !showAllUsageSections },
                         onRefresh = {
-                            isLoadingUsage = true
-                            if (!webBridge.requestUsage()) {
-                                isLoadingUsage = false
-                            }
+                            startUsageFetch(preserveComposerFocus = isComposerFocused)
                         },
                         onOpenWebUsage = {
                             showUsageCard = false
                             webBridge.openUsage()
                         },
-                        onDismiss = { showUsageCard = false }
+                        onDismiss = {
+                            showUsageCard = false
+                            isLoadingUsage = false
+                            blockWebViewFocusForUsage = false
+                        }
                     )
                 }
 
@@ -850,6 +886,9 @@ fun AntigravityApp(
                     isFloatingOverlay = isSplitLayout,
                     isUsageOpen = showUsageCard,
                     focusRequester = composerFocusRequester,
+                    onFocusChanged = { focused ->
+                        isComposerFocused = focused
+                    },
                     onSend = { fromHardwareKeyboard ->
                         val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
                         if (hasContent && !isSendingMessage) {
@@ -880,13 +919,12 @@ fun AntigravityApp(
                     onOpenUsage = {
                         if (showUsageCard) {
                             showUsageCard = false
+                            isLoadingUsage = false
+                            blockWebViewFocusForUsage = false
                         } else {
                             showUsageCard = true
                             showAllUsageSections = false
-                            isLoadingUsage = true
-                            if (!webBridge.requestUsage()) {
-                                isLoadingUsage = false
-                            }
+                            startUsageFetch(preserveComposerFocus = isComposerFocused)
                         }
                     },
                     onOpenPermissionsPicker = {
@@ -1014,10 +1052,7 @@ fun AntigravityApp(
                         modelSubOptions = emptyList()
                         showUsageCard = true
                         showAllUsageSections = false
-                        isLoadingUsage = true
-                        if (!webBridge.requestUsage()) {
-                            isLoadingUsage = false
-                        }
+                        startUsageFetch(preserveComposerFocus = false)
                     },
                     onDismiss = {
                         showModelSheet = false
@@ -1077,6 +1112,17 @@ fun AntigravityApp(
         }
     }
 }
+
+internal fun shouldBlockWebViewFocusDuringUsage(
+    isLoadingUsage: Boolean,
+    isComposerFocused: Boolean
+): Boolean = isLoadingUsage && isComposerFocused
+
+internal fun shouldAcceptNativeFocusRequest(
+    isLoadingUsage: Boolean,
+    nowMs: Long,
+    suppressUntilMs: Long
+): Boolean = !isLoadingUsage && nowMs >= suppressUntilMs
 
 private const val MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 

@@ -1,5 +1,6 @@
 package com.adriantache.antigravitywrapper
 
+import com.adriantache.antigravitywrapper.bridge.AntigravityBridgeScript
 import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.BridgeEvent
 import com.adriantache.antigravitywrapper.bridge.ComposerBridgeProtocol
@@ -382,5 +383,29 @@ class ComposerBridgeProtocolTest {
                 canSend = true
             )
         )
+    }
+
+    @Test
+    fun usageFocusGuards_preventStealingFocusWhenUnfocusedAndPreserveWhenFocused() {
+        assertFalse(shouldBlockWebViewFocusDuringUsage(isLoadingUsage = false, isComposerFocused = false))
+        assertFalse(shouldBlockWebViewFocusDuringUsage(isLoadingUsage = false, isComposerFocused = true))
+        assertFalse(shouldBlockWebViewFocusDuringUsage(isLoadingUsage = true, isComposerFocused = false))
+        assertTrue(shouldBlockWebViewFocusDuringUsage(isLoadingUsage = true, isComposerFocused = true))
+
+        assertFalse(shouldAcceptNativeFocusRequest(isLoadingUsage = true, nowMs = 2000L, suppressUntilMs = 0L))
+        assertFalse(shouldAcceptNativeFocusRequest(isLoadingUsage = false, nowMs = 1500L, suppressUntilMs = 2000L))
+        assertTrue(shouldAcceptNativeFocusRequest(isLoadingUsage = false, nowMs = 2000L, suppressUntilMs = 2000L))
+        assertTrue(shouldAcceptNativeFocusRequest(isLoadingUsage = false, nowMs = 2500L, suppressUntilMs = 2000L))
+    }
+
+    @Test
+    fun bridgeScript_usesReactImmuneCollapseAttrsAndOverlayFocusGuard() {
+        val script = AntigravityBridgeScript.SCRIPT
+        assertTrue(script.contains("data-agy-empty-composer-shell"))
+        assertTrue(script.contains("data-agy-empty-shell-inner"))
+        assertTrue(script.contains("data-agy-empty-composer-parent"))
+        assertTrue(script.contains("beginOverlayScrape"))
+        assertTrue(script.contains("endOverlayScrape"))
+        assertTrue(script.contains("findAllComposerRoots"))
     }
 }
