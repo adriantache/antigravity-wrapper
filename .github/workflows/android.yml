@@ -99,13 +99,31 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
 
       - name: Publish GitHub Release (from tag push)
+        id: publish_release_tag
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: app/build/outputs/apk/release/*.apk
+
+      - name: Fallback Publish GitHub Release (via gh CLI)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && steps.publish_release_tag.outcome == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "$TAG_NAME" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          if ! gh release create "$TAG_NAME" app/build/outputs/apk/release/*.apk --title "$TAG_NAME" --generate-notes $PRERELEASE_FLAG; then
+            echo "Retrying release creation without --generate-notes..."
+            gh release create "$TAG_NAME" app/build/outputs/apk/release/*.apk --title "$TAG_NAME" --notes "Release $TAG_NAME" $PRERELEASE_FLAG
+          fi
 
       - name: Publish GitHub Release (from manual dispatch)
         if: github.event_name == 'workflow_dispatch'
