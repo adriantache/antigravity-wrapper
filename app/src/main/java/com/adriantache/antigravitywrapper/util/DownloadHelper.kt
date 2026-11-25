@@ -174,8 +174,7 @@ object DownloadHelper {
         val stripped = rawName
             .orEmpty()
             .substringAfterLast('/')
-            ?.substringAfterLast('\\')
-            .orEmpty()
+            .substringAfterLast('\\')
             .replace(Regex("[\\u0000-\\u001F\\u007F]"), "")
             .replace(Regex("""[\\/:*?"<>|]"""), "_")
             .trim()
