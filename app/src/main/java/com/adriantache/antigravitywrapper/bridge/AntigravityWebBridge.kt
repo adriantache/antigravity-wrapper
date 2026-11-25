@@ -14,6 +14,7 @@ import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
@@ -40,6 +41,7 @@ class AntigravityWebBridge(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val downloadExecutor = Executors.newSingleThreadExecutor()
     private val frameProxies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
+    private val downloadProxies = CopyOnWriteArrayList<JavaScriptReplyProxy>()
     private val backRequestSeq = AtomicLong(0L)
     private val downloadRequestSeq = AtomicLong(0L)
     private val pendingBackRequests = LinkedHashMap<String, PendingBackRequest>()
@@ -91,6 +93,24 @@ class AntigravityWebBridge(
                 val event = ComposerBridgeProtocol.parseEvent(message.data) ?: return@addWebMessageListener
                 handleEvent(frameKey, isMainFrame, replyProxy, event)
             }
+
+            WebViewCompat.addWebMessageListener(
+                webView,
+                AntigravityDownloadScript.BRIDGE_NAME,
+                setOf("*")
+            ) { _: WebView, message: WebMessageCompat, _: Uri, _: Boolean, replyProxy: JavaScriptReplyProxy ->
+                if (!downloadProxies.contains(replyProxy)) {
+                    downloadProxies.add(replyProxy)
+                }
+                when (val event = ComposerBridgeProtocol.parseEvent(message.data)) {
+                    BridgeEvent.DownloadBridgeReady -> Unit
+                    is BridgeEvent.DownloadStart -> postToMain { handleDownloadStart(event) }
+                    is BridgeEvent.DownloadChunk -> postToMain { handleDownloadChunk(event) }
+                    is BridgeEvent.DownloadCommit -> postToMain { handleDownloadCommit(event.downloadId) }
+                    is BridgeEvent.DownloadError -> postToMain { handleDownloadError(event.downloadId, event.error) }
+                    else -> Unit
+                }
+            }
         }
 
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
@@ -98,6 +118,11 @@ class AntigravityWebBridge(
                 webView,
                 AntigravityBridgeScript.SCRIPT,
                 allowedOrigins
+            )
+            WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                AntigravityDownloadScript.SCRIPT,
+                setOf("*")
             )
         }
     }
@@ -196,6 +221,8 @@ class AntigravityWebBridge(
                 )
             }
 
+            BridgeEvent.DownloadBridgeReady -> Unit
+
             is BridgeEvent.DownloadStart -> {
                 postToMain { handleDownloadStart(event) }
             }
@@ -223,6 +250,7 @@ class AntigravityWebBridge(
     fun resetForNavigation() {
         composerFrameKey = null
         frameProxies.clear()
+        downloadProxies.clear()
         postToMain {
             pendingBackRequests.values.forEach { req ->
                 req.completed = true
@@ -343,17 +371,44 @@ class AntigravityWebBridge(
     }
 
     fun requestBlobExport(url: String, fileName: String, mimeType: String): Boolean {
-        if (frameProxies.isEmpty()) return false
+        if (downloadProxies.isEmpty() && frameProxies.isEmpty()) return false
         val requestId = "exp_${downloadRequestSeq.incrementAndGet()}"
+        val originHint = extractBlobOriginHint(url)
         val timeout = Runnable {
             pendingBlobTimeouts.remove(requestId)
             pendingDownloads.remove(requestId)
-            onDownloadOutcome(DownloadOutcome.Failed("Could not read exported blob"))
+            val msg = if (originHint.isNotEmpty()) {
+                "Could not read exported blob ($originHint)"
+            } else {
+                "Could not read exported blob"
+            }
+            onDownloadOutcome(DownloadOutcome.Failed(msg))
         }
         pendingBlobTimeouts[requestId] = timeout
         mainHandler.postDelayed(timeout, 8000L)
-        broadcast(ComposerBridgeProtocol.encodeExportBlob(requestId, url, fileName, mimeType))
+        val payload = ComposerBridgeProtocol.encodeExportBlob(requestId, url, fileName, mimeType)
+        var delivered = false
+        downloadProxies.toList().forEach { proxy ->
+            if (safePost(proxy, payload)) {
+                delivered = true
+            } else {
+                downloadProxies.remove(proxy)
+            }
+        }
+        if (!delivered) {
+            broadcast(payload)
+        }
         return true
+    }
+
+    private fun extractBlobOriginHint(blobUrl: String): String {
+        if (!blobUrl.startsWith("blob:", ignoreCase = true)) return ""
+        val afterBlob = blobUrl.substring(5)
+        if (afterBlob.startsWith("null/", ignoreCase = true)) return "null"
+        val schemeEnd = afterBlob.indexOf("://")
+        if (schemeEnd <= 0) return ""
+        val slashAfterHost = afterBlob.indexOf('/', schemeEnd + 3)
+        return if (slashAfterHost > 0) afterBlob.substring(0, slashAfterHost) else afterBlob
     }
 
     private fun handleDownloadStart(event: BridgeEvent.DownloadStart) {

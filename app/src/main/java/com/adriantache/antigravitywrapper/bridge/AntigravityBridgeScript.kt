@@ -43,9 +43,6 @@ object AntigravityBridgeScript {
   var isScrapingOverlay = false;
   var suppressNativeFocusUntil = 0;
   var pendingAttachBatches = {};
-  var MAX_EXPORT_BYTES = 50 * 1024 * 1024;
-  var trackedBlobs = new Map();
-  var trackedBlobSeq = 0;
 
   function beginOverlayScrape() {
     isScrapingOverlay = true;
@@ -1128,187 +1125,6 @@ object AntigravityBridgeScript {
     setTimeout(function() { reportComposerState(true); }, 100);
   }
 
-  // 7c. Intercept blob:/data: artifact exports & track object URLs before revocation
-  function trackBlobUrl(url, obj) {
-    if (typeof url !== 'string' || !obj || typeof obj.arrayBuffer !== 'function') return;
-    if (typeof obj.size === 'number' && obj.size > MAX_EXPORT_BYTES) return;
-    if (trackedBlobs.size >= 24) {
-      var oldestKey = trackedBlobs.keys().next().value;
-      if (oldestKey !== undefined) trackedBlobs.delete(oldestKey);
-    }
-    trackedBlobSeq += 1;
-    trackedBlobs.set(url, { blob: obj, seq: trackedBlobSeq });
-  }
-
-  (function installBlobUrlTracker() {
-    try {
-      if (!window.URL || typeof window.URL.createObjectURL !== 'function') return;
-      var nativeCreate = window.URL.createObjectURL.bind(window.URL);
-      var nativeRevoke = typeof window.URL.revokeObjectURL === 'function'
-        ? window.URL.revokeObjectURL.bind(window.URL)
-        : null;
-
-      window.URL.createObjectURL = function(obj) {
-        var url = nativeCreate(obj);
-        trackBlobUrl(url, obj);
-        return url;
-      };
-
-      if (nativeRevoke) {
-        window.URL.revokeObjectURL = function(url) {
-          var entry = trackedBlobs.get(url);
-          if (entry) {
-            var capturedSeq = entry.seq;
-            setTimeout(function() {
-              var current = trackedBlobs.get(url);
-              if (current && current.seq === capturedSeq) {
-                trackedBlobs.delete(url);
-              }
-            }, 30000);
-            setTimeout(function() {
-              try { nativeRevoke(url); } catch (e) {}
-            }, 1000);
-          } else {
-            nativeRevoke(url);
-          }
-        };
-      }
-    } catch (e) {}
-  })();
-
-  function readBlobAsBase64(blob) {
-    return new Promise(function(resolve, reject) {
-      try {
-        var reader = new FileReader();
-        reader.onload = function() {
-          var res = typeof reader.result === 'string' ? reader.result : '';
-          var commaIdx = res.indexOf(',');
-          resolve(commaIdx >= 0 ? res.substring(commaIdx + 1) : '');
-        };
-        reader.onerror = function() {
-          reject(reader.error || new Error('Failed to read exported file'));
-        };
-        reader.readAsDataURL(blob);
-      } catch (e) {
-        reject(e);
-      }
-    });
-  }
-
-  async function streamBlobToNative(downloadId, blob, fileName, mimeType, sourceUrl) {
-    try {
-      if (!blob) {
-        postToNative({ type: 'downloadError', downloadId: downloadId, error: 'Empty export' });
-        return;
-      }
-      var size = typeof blob.size === 'number' ? blob.size : 0;
-      if (size > MAX_EXPORT_BYTES) {
-        postToNative({ type: 'downloadError', downloadId: downloadId, error: 'Exported file exceeds 50 MB limit' });
-        return;
-      }
-      var b64 = await readBlobAsBase64(blob);
-      postToNative({
-        type: 'downloadStart',
-        downloadId: downloadId,
-        fileName: fileName || '',
-        mimeType: mimeType || blob.type || '',
-        totalBytes: size,
-        sourceUrl: sourceUrl || ''
-      });
-      var chunkSize = 200000;
-      for (var offset = 0; offset < b64.length; offset += chunkSize) {
-        postToNative({
-          type: 'downloadChunk',
-          downloadId: downloadId,
-          data: b64.slice(offset, offset + chunkSize)
-        });
-      }
-      postToNative({ type: 'downloadCommit', downloadId: downloadId });
-    } catch (e) {
-      postToNative({
-        type: 'downloadError',
-        downloadId: downloadId,
-        error: (e && e.message) ? String(e.message) : 'Failed to export file'
-      });
-    }
-  }
-
-  async function exportUrlToNative(downloadId, url, fileName, mimeType) {
-    try {
-      var tracked = trackedBlobs.get(url);
-      if (tracked && tracked.blob) {
-        await streamBlobToNative(downloadId, tracked.blob, fileName, mimeType, url);
-        return;
-      }
-      var resp = await fetch(url);
-      if (!resp.ok) {
-        throw new Error('HTTP ' + resp.status);
-      }
-      var blob = await resp.blob();
-      await streamBlobToNative(downloadId, blob, fileName, mimeType, url);
-    } catch (e) {
-      postToNative({
-        type: 'downloadError',
-        downloadId: downloadId,
-        error: (e && e.message) ? String(e.message) : 'Failed to read exported file'
-      });
-    }
-  }
-
-  function hasNativeBridge() {
-    try {
-      var b = window[BRIDGE_NAME];
-      return !!(b && typeof b.postMessage === 'function');
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function shouldInterceptAnchorDownload(anchor) {
-    if (!anchor || (anchor.tagName || '').toUpperCase() !== 'A') return false;
-    if (!hasNativeBridge()) return false;
-    if (!anchor.hasAttribute('download') && !anchor.download) return false;
-    var href = (anchor.href || anchor.getAttribute('href') || '').trim().toLowerCase();
-    return href.indexOf('blob:') === 0 || href.indexOf('data:') === 0;
-  }
-
-  function handleAnchorDownload(anchor) {
-    var now = Date.now();
-    if (anchor.__agyExportAt && now - anchor.__agyExportAt < 500) return;
-    anchor.__agyExportAt = now;
-    var href = (anchor.href || anchor.getAttribute('href') || '').trim();
-    var fileName = anchor.getAttribute('download') || anchor.download || '';
-    var downloadId = 'dl_' + now + '_' + Math.random().toString(36).slice(2, 8);
-    exportUrlToNative(downloadId, href, fileName, '');
-  }
-
-  function installDownloadInterceptor() {
-    document.addEventListener('click', function(e) {
-      if (!e || e.defaultPrevented) return;
-      var target = e.target;
-      if (!target || typeof target.closest !== 'function') return;
-      var anchor = target.closest('a[download]');
-      if (shouldInterceptAnchorDownload(anchor)) {
-        e.preventDefault();
-        handleAnchorDownload(anchor);
-      }
-    }, false);
-
-    try {
-      if (window.HTMLAnchorElement && window.HTMLAnchorElement.prototype &&
-          typeof window.HTMLAnchorElement.prototype.click === 'function') {
-        var origAnchorClick = window.HTMLAnchorElement.prototype.click;
-        window.HTMLAnchorElement.prototype.click = function() {
-          if (shouldInterceptAnchorDownload(this)) {
-            handleAnchorDownload(this);
-            return;
-          }
-          return origAnchorClick.apply(this, arguments);
-        };
-      }
-    } catch (e) {}
-  }
-
   // 8. Menu / mobile drawer scraping & selection for Model and Permissions pickers
   function snapshotBodyChildren() {
     var set = new Set();
@@ -2322,18 +2138,6 @@ object AntigravityBridgeScript {
         ensureStyles();
         reportComposerState(true);
         break;
-
-      case 'exportBlob':
-        if (cmd.requestId && cmd.url) {
-          var matchesBlobOrigin = false;
-          try {
-            matchesBlobOrigin = cmd.url.indexOf('blob:' + window.location.origin + '/') === 0;
-          } catch (e) {}
-          if (trackedBlobs.has(cmd.url) || matchesBlobOrigin) {
-            exportUrlToNative(cmd.requestId, cmd.url, cmd.fileName || '', cmd.mimeType || '');
-          }
-        }
-        break;
     }
   }
 
@@ -2342,7 +2146,6 @@ object AntigravityBridgeScript {
     ensureStyles();
     installFocusGuard();
     installScrollTracker();
-    installDownloadInterceptor();
 
     // Zero-DOM-mutation-overhead watchdog: never attach a document.body subtree MutationObserver
     // or ResizeObserver (which fire thousands of times while React hydrates long conversations).

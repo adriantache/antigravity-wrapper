@@ -1,6 +1,7 @@
 package com.adriantache.antigravitywrapper
 
 import com.adriantache.antigravitywrapper.bridge.AntigravityBridgeScript
+import com.adriantache.antigravitywrapper.bridge.AntigravityDownloadScript
 import com.adriantache.antigravitywrapper.bridge.BridgeConfig
 import com.adriantache.antigravitywrapper.bridge.BridgeEvent
 import com.adriantache.antigravitywrapper.bridge.ComposerBridgeProtocol
@@ -358,6 +359,10 @@ class ComposerBridgeProtocolTest {
         assertEquals("Blob revoked", err.error)
 
         assertNull(ComposerBridgeProtocol.parseEvent("""{"type":"downloadStart","downloadId":""}"""))
+        assertEquals(
+            BridgeEvent.DownloadBridgeReady,
+            ComposerBridgeProtocol.parseEvent("""{"type":"downloadBridgeReady"}""")
+        )
     }
 
     @Test
@@ -452,8 +457,11 @@ class ComposerBridgeProtocolTest {
         assertTrue(script.contains("beginOverlayScrape"))
         assertTrue(script.contains("endOverlayScrape"))
         assertTrue(script.contains("findAllComposerRoots"))
-        assertTrue(script.contains("installBlobUrlTracker"))
-        assertTrue(script.contains("installDownloadInterceptor"))
-        assertTrue(script.contains("exportBlob"))
+
+        val downloadScript = AntigravityDownloadScript.SCRIPT
+        assertTrue(downloadScript.contains("wrapUrlApi"))
+        assertTrue(downloadScript.contains("installDownloadInterceptor"))
+        assertTrue(downloadScript.contains("exportBlob"))
+        assertTrue(downloadScript.contains("blob:null/"))
     }
 }

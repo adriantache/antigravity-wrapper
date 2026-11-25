@@ -87,6 +87,7 @@ sealed class BridgeEvent {
         val action: String = ""
     ) : BridgeEvent()
     data class WebNotification(val title: String, val body: String, val url: String) : BridgeEvent()
+    data object DownloadBridgeReady : BridgeEvent()
     data class DownloadStart(
         val downloadId: String,
         val fileName: String,
@@ -230,6 +231,8 @@ object ComposerBridgeProtocol {
                     body = json.optString("body", ""),
                     url = json.optString("url", "")
                 )
+
+                "downloadBridgeReady" -> BridgeEvent.DownloadBridgeReady
 
                 "downloadStart" -> {
                     val downloadId = json.optString("downloadId", "").trim()
