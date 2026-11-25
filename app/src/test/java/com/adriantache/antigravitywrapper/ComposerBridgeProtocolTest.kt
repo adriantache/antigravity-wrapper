@@ -313,6 +313,51 @@ class ComposerBridgeProtocolTest {
         val navBack = JSONObject(ComposerBridgeProtocol.encodeNavigateBack("back_42"))
         assertEquals("navigateBack", navBack.getString("type"))
         assertEquals("back_42", navBack.getString("requestId"))
+
+        val exportBlob = JSONObject(
+            ComposerBridgeProtocol.encodeExportBlob(
+                requestId = "exp_7",
+                url = "blob:https://antigravity.static.usercontent.goog/abc",
+                fileName = "plan.md",
+                mimeType = "text/markdown"
+            )
+        )
+        assertEquals("exportBlob", exportBlob.getString("type"))
+        assertEquals("exp_7", exportBlob.getString("requestId"))
+        assertEquals("blob:https://antigravity.static.usercontent.goog/abc", exportBlob.getString("url"))
+        assertEquals("plan.md", exportBlob.getString("fileName"))
+        assertEquals("text/markdown", exportBlob.getString("mimeType"))
+    }
+
+    @Test
+    fun parseEvent_downloadEvents_parseAllFields() {
+        val start = ComposerBridgeProtocol.parseEvent(
+            """{"type":"downloadStart","downloadId":"dl_1","fileName":"plan.md","mimeType":"text/markdown","totalBytes":512,"sourceUrl":"blob:https://antigravity.static.usercontent.goog/1"}"""
+        ) as BridgeEvent.DownloadStart
+        assertEquals("dl_1", start.downloadId)
+        assertEquals("plan.md", start.fileName)
+        assertEquals("text/markdown", start.mimeType)
+        assertEquals(512L, start.totalBytes)
+        assertEquals("blob:https://antigravity.static.usercontent.goog/1", start.sourceUrl)
+
+        val chunk = ComposerBridgeProtocol.parseEvent(
+            """{"type":"downloadChunk","downloadId":"dl_1","data":"IyBIZWxsbw=="}"""
+        ) as BridgeEvent.DownloadChunk
+        assertEquals("dl_1", chunk.downloadId)
+        assertEquals("IyBIZWxsbw==", chunk.data)
+
+        val commit = ComposerBridgeProtocol.parseEvent(
+            """{"type":"downloadCommit","downloadId":"dl_1"}"""
+        ) as BridgeEvent.DownloadCommit
+        assertEquals("dl_1", commit.downloadId)
+
+        val err = ComposerBridgeProtocol.parseEvent(
+            """{"type":"downloadError","downloadId":"dl_1","error":"Blob revoked"}"""
+        ) as BridgeEvent.DownloadError
+        assertEquals("dl_1", err.downloadId)
+        assertEquals("Blob revoked", err.error)
+
+        assertNull(ComposerBridgeProtocol.parseEvent("""{"type":"downloadStart","downloadId":""}"""))
     }
 
     @Test
@@ -407,5 +452,8 @@ class ComposerBridgeProtocolTest {
         assertTrue(script.contains("beginOverlayScrape"))
         assertTrue(script.contains("endOverlayScrape"))
         assertTrue(script.contains("findAllComposerRoots"))
+        assertTrue(script.contains("installBlobUrlTracker"))
+        assertTrue(script.contains("installDownloadInterceptor"))
+        assertTrue(script.contains("exportBlob"))
     }
 }

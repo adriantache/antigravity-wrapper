@@ -25,14 +25,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
+import com.adriantache.antigravitywrapper.util.DownloadHelper
+import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlNavigationAction
 import com.adriantache.antigravitywrapper.util.UrlPolicy
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 const val MOBILE_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.200 Mobile Safari/537.36"
@@ -102,12 +108,15 @@ fun AntigravityWebView(
     onPageFinished: () -> Unit = {},
     onProgressChanged: (Int) -> Unit = {},
     onConnectionError: (errorCode: Int, description: String, failingUrl: String) -> Unit = { _, _, _ -> },
-    onScrollChanged: (canScrollUp: Boolean) -> Unit = {}
+    onScrollChanged: (canScrollUp: Boolean) -> Unit = {},
+    onDownloadOutcome: (DownloadOutcome) -> Unit = {}
 ) {
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     val currentConfiguredUrl by rememberUpdatedState(url)
     val latestIsDesktopMode by rememberUpdatedState(isDesktopMode)
+    val latestOnDownloadOutcome by rememberUpdatedState(onDownloadOutcome)
+    val coroutineScope = rememberCoroutineScope()
 
     // File chooser launcher for file uploads in Antigravity web interface
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -347,6 +356,78 @@ fun AntigravityWebView(
                     }
                     // canScrollUp is false when at the very top (scrollY == 0)
                     onScrollChanged(scrollY > 0)
+                }
+
+                setDownloadListener { downloadUrl, userAgent, contentDisposition, mimetype, _ ->
+                    val trimmedUrl = downloadUrl.orEmpty().trim()
+                    if (trimmedUrl.isEmpty()) return@setDownloadListener
+
+                    if (bridge?.isRecentlyExportedUrl(trimmedUrl) == true) {
+                        return@setDownloadListener
+                    }
+
+                    val lower = trimmedUrl.lowercase()
+                    when {
+                        lower.startsWith("http://") || lower.startsWith("https://") -> {
+                            val outcome = DownloadHelper.enqueueHttpDownload(
+                                context = context,
+                                url = trimmedUrl,
+                                userAgent = userAgent,
+                                contentDisposition = contentDisposition,
+                                mimeType = mimetype
+                            )
+                            latestOnDownloadOutcome(outcome)
+                        }
+
+                        lower.startsWith("data:") -> {
+                            coroutineScope.launch {
+                                val outcome = withContext(Dispatchers.IO) {
+                                    val parsed = DownloadHelper.parseDataUri(trimmedUrl)
+                                        ?: return@withContext DownloadOutcome.Failed("Unsupported data download")
+                                    val effectiveMime = mimetype?.takeIf { it.isNotBlank() } ?: parsed.mimeType
+                                    val fileName = DownloadHelper.resolveDownloadFileName(
+                                        url = null,
+                                        contentDisposition = contentDisposition,
+                                        mimeType = effectiveMime
+                                    )
+                                    try {
+                                        val saved = DownloadHelper.saveBytesToDownloads(
+                                            context = context,
+                                            bytes = parsed.bytes,
+                                            rawFileName = fileName,
+                                            reportedMimeType = effectiveMime
+                                        )
+                                        DownloadOutcome.SavedToDownloads(saved)
+                                    } catch (e: Exception) {
+                                        DownloadOutcome.Failed(e.message ?: "Failed to save download")
+                                    }
+                                }
+                                latestOnDownloadOutcome(outcome)
+                            }
+                        }
+
+                        lower.startsWith("blob:") -> {
+                            val fileName = DownloadHelper.resolveDownloadFileName(
+                                url = null,
+                                contentDisposition = contentDisposition,
+                                mimeType = mimetype
+                            )
+                            val requested = bridge?.requestBlobExport(
+                                url = trimmedUrl,
+                                fileName = fileName,
+                                mimeType = mimetype.orEmpty()
+                            ) ?: false
+                            if (!requested) {
+                                latestOnDownloadOutcome(
+                                    DownloadOutcome.Failed("Blob download is unavailable on this page")
+                                )
+                            }
+                        }
+
+                        else -> {
+                            latestOnDownloadOutcome(DownloadOutcome.Failed("Unsupported download link"))
+                        }
+                    }
                 }
 
                 webViewInstance = this

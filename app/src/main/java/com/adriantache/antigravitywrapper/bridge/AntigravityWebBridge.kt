@@ -9,9 +9,12 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.adriantache.antigravitywrapper.util.DownloadHelper
+import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -31,12 +34,18 @@ class AntigravityWebBridge(
     private val onScrollStateChanged: (Boolean) -> Unit,
     private val onSendResult: (ok: Boolean, error: String?) -> Unit,
     private val onAttachResult: (ok: Boolean, fileNames: List<String>, error: String?) -> Unit = { _, _, _ -> },
-    private val onRequestNativeFocus: () -> Unit = {}
+    private val onRequestNativeFocus: () -> Unit = {},
+    private val onDownloadOutcome: (DownloadOutcome) -> Unit = {}
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val downloadExecutor = Executors.newSingleThreadExecutor()
     private val frameProxies = ConcurrentHashMap<String, JavaScriptReplyProxy>()
     private val backRequestSeq = AtomicLong(0L)
+    private val downloadRequestSeq = AtomicLong(0L)
     private val pendingBackRequests = LinkedHashMap<String, PendingBackRequest>()
+    private val pendingDownloads = LinkedHashMap<String, PendingDownload>()
+    private val pendingBlobTimeouts = LinkedHashMap<String, Runnable>()
+    private val recentExportedUrls = LinkedHashMap<String, Long>()
     @Volatile
     private var composerFrameKey: String? = null
 
@@ -45,6 +54,14 @@ class AntigravityWebBridge(
         val onResult: (handled: Boolean, onConversationList: Boolean) -> Unit,
         var timeoutRunnable: Runnable? = null,
         var completed: Boolean = false
+    )
+
+    private class PendingDownload(
+        val fileName: String,
+        val mimeType: String,
+        val totalBytes: Long,
+        val chunks: MutableList<String> = mutableListOf(),
+        var totalBase64Chars: Long = 0L
     )
     @Volatile
     private var currentConfig = BridgeConfig(
@@ -178,6 +195,22 @@ class AntigravityWebBridge(
                     targetUrl = event.url
                 )
             }
+
+            is BridgeEvent.DownloadStart -> {
+                postToMain { handleDownloadStart(event) }
+            }
+
+            is BridgeEvent.DownloadChunk -> {
+                postToMain { handleDownloadChunk(event) }
+            }
+
+            is BridgeEvent.DownloadCommit -> {
+                postToMain { handleDownloadCommit(event.downloadId) }
+            }
+
+            is BridgeEvent.DownloadError -> {
+                postToMain { handleDownloadError(event.downloadId, event.error) }
+            }
         }
     }
 
@@ -301,6 +334,88 @@ class AntigravityWebBridge(
 
     fun dispatchEscape() {
         broadcast(ComposerBridgeProtocol.encodeSimpleCommand("dispatchEscape"))
+    }
+
+    fun isRecentlyExportedUrl(url: String): Boolean {
+        val now = System.currentTimeMillis()
+        recentExportedUrls.entries.removeAll { now - it.value > 2500L }
+        return recentExportedUrls.containsKey(url)
+    }
+
+    fun requestBlobExport(url: String, fileName: String, mimeType: String): Boolean {
+        if (frameProxies.isEmpty()) return false
+        val requestId = "exp_${downloadRequestSeq.incrementAndGet()}"
+        val timeout = Runnable {
+            pendingBlobTimeouts.remove(requestId)
+            pendingDownloads.remove(requestId)
+            onDownloadOutcome(DownloadOutcome.Failed("Could not read exported blob"))
+        }
+        pendingBlobTimeouts[requestId] = timeout
+        mainHandler.postDelayed(timeout, 8000L)
+        broadcast(ComposerBridgeProtocol.encodeExportBlob(requestId, url, fileName, mimeType))
+        return true
+    }
+
+    private fun handleDownloadStart(event: BridgeEvent.DownloadStart) {
+        pendingBlobTimeouts.remove(event.downloadId)?.let { mainHandler.removeCallbacks(it) }
+        if (event.sourceUrl.isNotBlank()) {
+            val now = System.currentTimeMillis()
+            recentExportedUrls.entries.removeAll { now - it.value > 2500L }
+            recentExportedUrls[event.sourceUrl] = now
+        }
+        if (event.totalBytes > MAX_EXPORT_BYTES) {
+            pendingDownloads.remove(event.downloadId)
+            onDownloadOutcome(DownloadOutcome.Failed("Exported file exceeds 50 MB limit"))
+            return
+        }
+        pendingDownloads[event.downloadId] = PendingDownload(
+            fileName = event.fileName,
+            mimeType = event.mimeType,
+            totalBytes = event.totalBytes
+        )
+    }
+
+    private fun handleDownloadChunk(event: BridgeEvent.DownloadChunk) {
+        val pending = pendingDownloads[event.downloadId] ?: return
+        val nextChars = pending.totalBase64Chars + event.data.length
+        if (nextChars > MAX_EXPORT_BASE64_CHARS) {
+            pendingDownloads.remove(event.downloadId)
+            onDownloadOutcome(DownloadOutcome.Failed("Exported file exceeds 50 MB limit"))
+            return
+        }
+        pending.totalBase64Chars = nextChars
+        pending.chunks.add(event.data)
+    }
+
+    private fun handleDownloadCommit(downloadId: String) {
+        val pending = pendingDownloads.remove(downloadId) ?: return
+        val joined = pending.chunks.joinToString(separator = "")
+        downloadExecutor.execute {
+            val outcome = try {
+                val bytes = DownloadHelper.decodeBase64(joined)
+                val saved = DownloadHelper.saveBytesToDownloads(
+                    context = context,
+                    bytes = bytes,
+                    rawFileName = pending.fileName,
+                    reportedMimeType = pending.mimeType
+                )
+                DownloadOutcome.SavedToDownloads(saved)
+            } catch (e: Exception) {
+                DownloadOutcome.Failed(e.message ?: "Failed to save exported file")
+            }
+            postToMain { onDownloadOutcome(outcome) }
+        }
+    }
+
+    private fun handleDownloadError(downloadId: String, error: String) {
+        pendingBlobTimeouts.remove(downloadId)?.let { mainHandler.removeCallbacks(it) }
+        pendingDownloads.remove(downloadId)
+        onDownloadOutcome(DownloadOutcome.Failed(error.ifBlank { "Export failed" }))
+    }
+
+    companion object {
+        private const val MAX_EXPORT_BYTES = 50L * 1024L * 1024L
+        private const val MAX_EXPORT_BASE64_CHARS = 70L * 1024L * 1024L
     }
 
     /**

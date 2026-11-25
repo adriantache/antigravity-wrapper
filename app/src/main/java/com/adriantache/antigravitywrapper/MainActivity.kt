@@ -49,6 +49,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
@@ -96,6 +97,8 @@ import com.adriantache.antigravitywrapper.ui.components.SettingsDialog
 import com.adriantache.antigravitywrapper.ui.components.UsageOverlayCard
 import com.adriantache.antigravitywrapper.ui.components.dispatchEscapeEvent
 import com.adriantache.antigravitywrapper.ui.theme.AntigravityWrapperTheme
+import com.adriantache.antigravitywrapper.util.DownloadHelper
+import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlPolicy
 import kotlinx.coroutines.Dispatchers
@@ -265,6 +268,40 @@ fun AntigravityApp(
     var usageSections by remember { mutableStateOf<List<UsageSection>>(emptyList()) }
     var showAllUsageSections by remember { mutableStateOf(false) }
 
+    val handleDownloadOutcome: (DownloadOutcome) -> Unit = { outcome ->
+        coroutineScope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            when (outcome) {
+                is DownloadOutcome.SavedToDownloads -> {
+                    val result = snackbarHostState.showSnackbar(
+                        message = "Saved ${outcome.saved.fileName} to Downloads",
+                        actionLabel = "Open",
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        DownloadHelper.openDownloadedFile(
+                            context = context,
+                            uri = outcome.saved.uri,
+                            mimeType = outcome.saved.mimeType
+                        )
+                    }
+                }
+                is DownloadOutcome.EnqueuedInManager -> {
+                    snackbarHostState.showSnackbar(
+                        message = "Downloading ${outcome.fileName}...",
+                        duration = SnackbarDuration.Short
+                    )
+                }
+                is DownloadOutcome.Failed -> {
+                    snackbarHostState.showSnackbar(
+                        message = outcome.message.ifBlank { "Download failed" },
+                        duration = SnackbarDuration.Short
+                    )
+                }
+            }
+        }
+    }
+
     // Bidirectional WebMessage bridge to the Antigravity iframe
     val webBridge = remember(context) {
         AntigravityWebBridge(
@@ -369,7 +406,8 @@ fun AntigravityApp(
                 if (shouldAcceptNativeFocusRequest(isLoadingUsage, System.currentTimeMillis(), suppressNativeFocusUntilMs)) {
                     pendingNativeFocus = true
                 }
-            }
+            },
+            onDownloadOutcome = handleDownloadOutcome
         )
     }
 
@@ -780,7 +818,8 @@ fun AntigravityApp(
                     },
                     onScrollChanged = { canScroll ->
                         webViewRootCanScrollUp = canScroll
-                    }
+                    },
+                    onDownloadOutcome = handleDownloadOutcome
                 )
 
                 if (isPullToRefreshEnabled) {

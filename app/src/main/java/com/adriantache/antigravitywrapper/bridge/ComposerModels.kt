@@ -87,6 +87,16 @@ sealed class BridgeEvent {
         val action: String = ""
     ) : BridgeEvent()
     data class WebNotification(val title: String, val body: String, val url: String) : BridgeEvent()
+    data class DownloadStart(
+        val downloadId: String,
+        val fileName: String,
+        val mimeType: String,
+        val totalBytes: Long,
+        val sourceUrl: String = ""
+    ) : BridgeEvent()
+    data class DownloadChunk(val downloadId: String, val data: String) : BridgeEvent()
+    data class DownloadCommit(val downloadId: String) : BridgeEvent()
+    data class DownloadError(val downloadId: String, val error: String) : BridgeEvent()
 }
 
 object ComposerBridgeProtocol {
@@ -221,6 +231,42 @@ object ComposerBridgeProtocol {
                     url = json.optString("url", "")
                 )
 
+                "downloadStart" -> {
+                    val downloadId = json.optString("downloadId", "").trim()
+                    if (downloadId.isEmpty()) null
+                    else BridgeEvent.DownloadStart(
+                        downloadId = downloadId,
+                        fileName = json.optString("fileName", "").trim(),
+                        mimeType = json.optString("mimeType", "").trim(),
+                        totalBytes = json.optLong("totalBytes", 0L),
+                        sourceUrl = json.optString("sourceUrl", "").trim()
+                    )
+                }
+
+                "downloadChunk" -> {
+                    val downloadId = json.optString("downloadId", "").trim()
+                    if (downloadId.isEmpty()) null
+                    else BridgeEvent.DownloadChunk(
+                        downloadId = downloadId,
+                        data = json.optString("data", "")
+                    )
+                }
+
+                "downloadCommit" -> {
+                    val downloadId = json.optString("downloadId", "").trim()
+                    if (downloadId.isEmpty()) null
+                    else BridgeEvent.DownloadCommit(downloadId = downloadId)
+                }
+
+                "downloadError" -> {
+                    val downloadId = json.optString("downloadId", "").trim()
+                    if (downloadId.isEmpty()) null
+                    else BridgeEvent.DownloadError(
+                        downloadId = downloadId,
+                        error = json.optString("error", "Export failed").trim()
+                    )
+                }
+
                 else -> null
             }
         } catch (_: Exception) {
@@ -329,6 +375,19 @@ object ComposerBridgeProtocol {
     fun encodeAttachBatchCommit(batchId: String): String = JSONObject().apply {
         put("type", "attachBatchCommit")
         put("batchId", batchId)
+    }.toString()
+
+    fun encodeExportBlob(
+        requestId: String,
+        url: String,
+        fileName: String = "",
+        mimeType: String = ""
+    ): String = JSONObject().apply {
+        put("type", "exportBlob")
+        put("requestId", requestId)
+        put("url", url)
+        put("fileName", fileName)
+        put("mimeType", mimeType)
     }.toString()
 
     /**
