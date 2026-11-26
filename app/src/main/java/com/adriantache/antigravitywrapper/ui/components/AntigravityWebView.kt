@@ -1,8 +1,10 @@
 package com.adriantache.antigravitywrapper.ui.components
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
@@ -30,12 +32,14 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
 import com.adriantache.antigravitywrapper.util.DownloadHelper
 import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlNavigationAction
 import com.adriantache.antigravitywrapper.util.UrlPolicy
+import com.adriantache.antigravitywrapper.util.WebPermissionPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -109,14 +113,42 @@ fun AntigravityWebView(
     onProgressChanged: (Int) -> Unit = {},
     onConnectionError: (errorCode: Int, description: String, failingUrl: String) -> Unit = { _, _, _ -> },
     onScrollChanged: (canScrollUp: Boolean) -> Unit = {},
-    onDownloadOutcome: (DownloadOutcome) -> Unit = {}
+    onDownloadOutcome: (DownloadOutcome) -> Unit = {},
+    onPermissionDenied: (String) -> Unit = {}
 ) {
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var pendingPermissionRequest by remember { mutableStateOf<PermissionRequest?>(null) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     val currentConfiguredUrl by rememberUpdatedState(url)
     val latestIsDesktopMode by rememberUpdatedState(isDesktopMode)
     val latestOnDownloadOutcome by rememberUpdatedState(onDownloadOutcome)
+    val latestOnPermissionDenied by rememberUpdatedState(onPermissionDenied)
     val coroutineScope = rememberCoroutineScope()
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        val request = pendingPermissionRequest
+        pendingPermissionRequest = null
+        if (request != null) {
+            val grantable = WebPermissionPolicy.resolveGrantableResources(
+                requestedResources = request.resources,
+                hasRecordAudioPermission = granted
+            )
+            try {
+                if (grantable.isNotEmpty()) {
+                    request.grant(grantable)
+                } else {
+                    request.deny()
+                }
+            } catch (_: Exception) {
+                // Ignore if request was already canceled or WebView navigated away
+            }
+        }
+        if (!granted) {
+            latestOnPermissionDenied("Microphone permission is required for voice input")
+        }
+    }
 
     // File chooser launcher for file uploads in Antigravity web interface
     val fileChooserLauncher = rememberLauncherForActivityResult(
@@ -167,6 +199,12 @@ fun AntigravityWebView(
 
     DisposableEffect(Unit) {
         onDispose {
+            try {
+                pendingPermissionRequest?.deny()
+            } catch (_: Exception) {
+                // Ignore if already handled
+            }
+            pendingPermissionRequest = null
             webViewInstance?.destroy()
         }
     }
@@ -321,8 +359,44 @@ fun AntigravityWebView(
                     }
 
                     override fun onPermissionRequest(request: PermissionRequest?) {
-                        // Automatically grant permissions for remote dev sessions (microphone, audio, etc.)
-                        request?.grant(request.resources)
+                        if (request == null) return
+                        val requested = request.resources.orEmpty()
+                        val hasAudioPermission = ContextCompat.checkSelfPermission(
+                            context,
+                            Manifest.permission.RECORD_AUDIO
+                        ) == PackageManager.PERMISSION_GRANTED
+
+                        if (WebPermissionPolicy.requiresRecordAudioPrompt(requested, hasAudioPermission)) {
+                            try {
+                                pendingPermissionRequest?.deny()
+                            } catch (_: Exception) {
+                                // Ignore stale canceled request
+                            }
+                            pendingPermissionRequest = request
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            return
+                        }
+
+                        val grantable = WebPermissionPolicy.resolveGrantableResources(
+                            requestedResources = requested,
+                            hasRecordAudioPermission = hasAudioPermission
+                        )
+                        try {
+                            if (grantable.isNotEmpty()) {
+                                request.grant(grantable)
+                            } else {
+                                request.deny()
+                            }
+                        } catch (_: Exception) {
+                            // Ignore if request was canceled or WebView navigated away
+                        }
+                    }
+
+                    override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                        super.onPermissionRequestCanceled(request)
+                        if (pendingPermissionRequest === request) {
+                            pendingPermissionRequest = null
+                        }
                     }
 
                     override fun onShowFileChooser(

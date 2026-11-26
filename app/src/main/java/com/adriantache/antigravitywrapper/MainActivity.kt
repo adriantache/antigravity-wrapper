@@ -1,7 +1,11 @@
 package com.adriantache.antigravitywrapper
 
+import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.ConnectivityManager
 import android.net.Network
@@ -11,6 +15,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
+import android.speech.RecognizerIntent
 import android.util.Base64
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -77,6 +83,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.adriantache.antigravitywrapper.bridge.AntigravityWebBridge
@@ -101,6 +108,9 @@ import com.adriantache.antigravitywrapper.util.DownloadHelper
 import com.adriantache.antigravitywrapper.util.DownloadOutcome
 import com.adriantache.antigravitywrapper.util.NotificationHelper
 import com.adriantache.antigravitywrapper.util.UrlPolicy
+import com.adriantache.antigravitywrapper.util.VoiceDictationController
+import com.adriantache.antigravitywrapper.util.VoiceInputHelper
+import com.adriantache.antigravitywrapper.util.VoiceStartResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -240,6 +250,7 @@ fun AntigravityApp(
     var attachedFileNames by remember { mutableStateOf<List<String>>(emptyList()) }
     var isAttachingFiles by remember { mutableStateOf(false) }
     var isSendingMessage by remember { mutableStateOf(false) }
+    var isVoiceListening by remember { mutableStateOf(false) }
     var lastSendWasHardwareKeyboard by remember { mutableStateOf(false) }
     var isComposerFocused by remember { mutableStateOf(false) }
     var pendingNativeFocus by remember { mutableStateOf(false) }
@@ -439,6 +450,115 @@ fun AntigravityApp(
         }
     }
 
+    fun updateDraftText(updated: String) {
+        draftText = updated
+        val key = activeConversationKey.ifBlank { composerState.conversationKey }
+        if (key.isNotBlank()) {
+            activeConversationKey = key
+            if (updated.isNotEmpty()) {
+                draftsByConversation[key] = updated
+            } else {
+                draftsByConversation.remove(key)
+            }
+        }
+    }
+
+    fun showMicrophonePermissionSnackbar(message: String) {
+        coroutineScope.launch {
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val result = snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = "Settings",
+                duration = SnackbarDuration.Long
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                try {
+                    val settingsIntent = Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null)
+                    )
+                    context.startActivity(settingsIntent)
+                } catch (_: Exception) {
+                    // Ignore if settings activity cannot be opened
+                }
+            }
+        }
+    }
+
+    val latestUpdateDraftText by rememberUpdatedState(::updateDraftText)
+    val latestShowVoiceError by rememberUpdatedState<(String, Boolean) -> Unit> { message, isPermissionError ->
+        if (isPermissionError) {
+            showMicrophonePermissionSnackbar(message)
+        } else {
+            coroutineScope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(
+                    message = message,
+                    duration = SnackbarDuration.Short
+                )
+            }
+        }
+    }
+
+    val voiceDictationController = remember(context) {
+        VoiceDictationController(
+            context = context.applicationContext,
+            onListeningChanged = { listening -> isVoiceListening = listening },
+            onTranscriptUpdate = { updated -> latestUpdateDraftText(updated) },
+            onError = { message, isPermissionError -> latestShowVoiceError(message, isPermissionError) }
+        )
+    }
+
+    DisposableEffect(voiceDictationController) {
+        onDispose {
+            voiceDictationController.cancel()
+        }
+    }
+
+    val nativeVoiceIntentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                ?.trim()
+                .orEmpty()
+            if (spoken.isNotEmpty()) {
+                updateDraftText(VoiceInputHelper.mergeVoiceTranscript(draftText, spoken))
+            }
+        }
+    }
+
+    fun startNativeVoiceDictation() {
+        when (voiceDictationController.start(draftText)) {
+            VoiceStartResult.STARTED -> Unit
+            VoiceStartResult.FALLBACK_TO_INTENT -> {
+                try {
+                    val intent = VoiceInputHelper.createRecognitionIntent(
+                        packageName = context.packageName,
+                        prompt = "Speak your message"
+                    )
+                    nativeVoiceIntentLauncher.launch(intent)
+                } catch (_: ActivityNotFoundException) {
+                    latestShowVoiceError("Voice recognition is not available on this device", false)
+                } catch (_: Exception) {
+                    latestShowVoiceError("Could not start voice input", false)
+                }
+            }
+        }
+    }
+
+    val voicePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            startNativeVoiceDictation()
+        } else {
+            showMicrophonePermissionSnackbar("Microphone permission is required for voice input")
+        }
+    }
+
     val showNativeComposer = isNativeComposerEnabled &&
         composerState.hasComposer &&
         !hasConnectionError
@@ -515,6 +635,13 @@ fun AntigravityApp(
     LaunchedEffect(showNativeComposer) {
         if (!showNativeComposer) {
             isComposerFocused = false
+            voiceDictationController.cancel()
+        }
+    }
+
+    LaunchedEffect(activeConversationKey) {
+        if (isVoiceListening) {
+            voiceDictationController.cancel()
         }
     }
 
@@ -819,7 +946,10 @@ fun AntigravityApp(
                     onScrollChanged = { canScroll ->
                         webViewRootCanScrollUp = canScroll
                     },
-                    onDownloadOutcome = handleDownloadOutcome
+                    onDownloadOutcome = handleDownloadOutcome,
+                    onPermissionDenied = { message ->
+                        showMicrophonePermissionSnackbar(message)
+                    }
                 )
 
                 if (isPullToRefreshEnabled) {
@@ -905,23 +1035,13 @@ fun AntigravityApp(
                         composerHeightPx = coords.size.height
                     },
                     text = draftText,
-                    onTextChange = { updated ->
-                        draftText = updated
-                        val key = activeConversationKey.ifBlank { composerState.conversationKey }
-                        if (key.isNotBlank()) {
-                            activeConversationKey = key
-                            if (updated.isNotEmpty()) {
-                                draftsByConversation[key] = updated
-                            } else {
-                                draftsByConversation.remove(key)
-                            }
-                        }
-                    },
+                    onTextChange = ::updateDraftText,
                     composerState = composerState,
                     attachedFileNames = attachedFileNames,
                     isAttaching = isAttachingFiles,
                     isSending = isSendingMessage,
                     showVoiceButton = isShowVoiceButtonEnabled,
+                    isVoiceListening = isVoiceListening,
                     isFloatingOverlay = isSplitLayout,
                     isUsageOpen = showUsageCard,
                     focusRequester = composerFocusRequester,
@@ -929,6 +1049,9 @@ fun AntigravityApp(
                         isComposerFocused = focused
                     },
                     onSend = { fromHardwareKeyboard ->
+                        if (isVoiceListening) {
+                            voiceDictationController.cancel()
+                        }
                         val hasContent = draftText.trim().isNotEmpty() || attachedFileNames.isNotEmpty()
                         if (hasContent && !isSendingMessage) {
                             showUsageCard = false
@@ -985,9 +1108,22 @@ fun AntigravityApp(
                         webBridge.clearAttachments()
                     },
                     onVoiceClick = {
-                        webBridge.triggerVoice()
+                        if (isVoiceListening) {
+                            voiceDictationController.stop()
+                        } else {
+                            val hasAudioPermission = ContextCompat.checkSelfPermission(
+                                context,
+                                Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasAudioPermission) {
+                                startNativeVoiceDictation()
+                            } else {
+                                voicePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
                     },
                     onSwitchToWebComposer = {
+                        voiceDictationController.cancel()
                         isNativeComposerEnabled = false
                         preferencesManager.isNativeComposerEnabled = false
                         coroutineScope.launch {

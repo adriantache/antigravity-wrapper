@@ -188,7 +188,7 @@ fun SettingsDialog(
                 // Toggle: Show Voice Button
                 SettingToggleRow(
                     title = "Show Voice Button",
-                    subtitle = "Display voice memo button in the input bar",
+                    subtitle = "Display voice input button in the input bar",
                     checked = isShowVoiceButton,
                     onCheckedChange = { isShowVoiceButton = it }
                 )

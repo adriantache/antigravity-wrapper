@@ -131,6 +131,7 @@ fun NativeComposerBar(
     isAttaching: Boolean = false,
     isSending: Boolean,
     showVoiceButton: Boolean,
+    isVoiceListening: Boolean = false,
     isFloatingOverlay: Boolean = false,
     isUsageOpen: Boolean = false,
     focusRequester: FocusRequester? = null,
@@ -351,9 +352,9 @@ fun NativeComposerBar(
                         ) {
                             if (text.isEmpty()) {
                                 Text(
-                                    text = "Ask anything…",
+                                    text = if (isVoiceListening) "Listening…" else "Ask anything…",
                                     style = TextStyle(
-                                        color = ComposerMutedText,
+                                        color = if (isVoiceListening) Color(0xFFE57373) else ComposerMutedText,
                                         fontSize = 15.sp,
                                         lineHeight = 21.sp
                                     ),
@@ -409,18 +410,18 @@ fun NativeComposerBar(
                         }
 
                         // Optional Voice button (off by default, clearly spaced away from Send)
-                        if (showVoiceButton && composerState.hasVoiceButton) {
+                        if (showVoiceButton) {
                             Box(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(ComposerChipBg)
+                                    .background(if (isVoiceListening) Color(0xFFD94A4A) else ComposerChipBg)
                                     .clickable(onClick = onVoiceClick),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = "Record voice memo",
+                                    imageVector = if (isVoiceListening) Icons.Default.Stop else Icons.Default.Mic,
+                                    contentDescription = if (isVoiceListening) "Stop voice input" else "Start voice input",
                                     tint = Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
